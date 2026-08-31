@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# Whole change set in one kitten diff: file list on the left, side-by-side
-# diff on the right, syntax highlighted, images included.
+# The whole change set in one view: file tree on the left, syntax-highlighted
+# diff on the right.
 #
 #   kdiff                every change on this branch, committed or not
 #   kdiff HEAD           uncommitted only (working tree + index)
 #   kdiff --staged       the index
 #   kdiff HEAD~3         against an older commit
+#   kdiff -k [args]      force the kitten diff view (side-by-side, images)
 #   kdiff -w [args]      in a new kitty OS window
 #   kdiff -t [args]      in a new kitty tab
 #
@@ -13,18 +14,29 @@
 # commit does not empty it out. Base is $KDIFF_BASE, else origin's default
 # branch, else origin/master, origin/main, master, main.
 #
-# Keys inside it: j/k scroll, n/p next/previous change, / search, a all
+# Viewer: diffnav (file tree on the left, GitHub style) when installed, else
+# kitten diff. $KDIFF_VIEWER=kitten|diffnav overrides; -k forces kitten diff,
+# which is the one that renders images.
+#
+# Keys in diffnav: ? or F1 lists them - moving between files, toggling the file
+# tree, side-by-side vs unified, and search.
+# Keys in kitten diff: j/k scroll, n/p next/previous change, / search, a all
 # context, q quit. Untracked files are not shown - git diff does not see them.
 set -uo pipefail
 
 pause() { [ -t 0 ] && { printf '\npress any key to close'; read -rsn1 </dev/tty 2>/dev/null; echo; }; }
 
 where=here
-case "${1:-}" in
-  -w|--window) where=os-window; shift ;;
-  -t|--tab)    where=tab;       shift ;;
-  -h|--help)   sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-esac
+force_kitten=
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -w|--window) where=os-window;  shift ;;
+    -t|--tab)    where=tab;        shift ;;
+    -k|--kitten) force_kitten=yes; shift ;;
+    -h|--help)   sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) break ;;
+  esac
+done
 
 if ! git rev-parse --show-toplevel >/dev/null 2>&1; then
   echo "kdiff: not inside a git repository: $PWD" >&2
@@ -35,7 +47,7 @@ if [ "$where" != here ]; then
   exec kitten @ launch --type="$where" --cwd "$PWD" \
     --title "diff: $(basename "$(git rev-parse --show-toplevel)")" \
     --os-window-title "diff: $(basename "$(git rev-parse --show-toplevel)")" \
-    "$0" "$@"
+    "$0" ${force_kitten:+-k} "$@"
 fi
 
 # The base this branch forked from. Bare kdiff diffs the working tree against
@@ -68,6 +80,22 @@ fi
 if [ -z "$(git diff --name-only "$@" 2>/dev/null | head -1)" ]; then
   echo "kdiff: no changes${label:-${*:+ for: $*}}"
   pause; exit 0
+fi
+
+# diffnav is a pager over `git diff`; kitten diff is a difftool over the tree.
+viewer="${KDIFF_VIEWER:-}"
+[ -n "$force_kitten" ] && viewer=kitten
+if [ -z "$viewer" ]; then
+  if command -v diffnav >/dev/null 2>&1; then viewer=diffnav; else viewer=kitten; fi
+fi
+if [ "$viewer" = diffnav ] && ! command -v diffnav >/dev/null 2>&1; then
+  echo "kdiff: diffnav not found (brew install diffnav) - using kitten diff" >&2
+  viewer=kitten
+fi
+
+if [ "$viewer" = diffnav ]; then
+  git diff "$@" | diffnav
+  exit "${PIPESTATUS[0]}"
 fi
 
 exec git difftool --dir-diff --no-prompt --tool=kitty "$@"

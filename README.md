@@ -129,15 +129,17 @@ Two things this does not reach: a shell opened before the fix (run
 
 ## Reviewing a diff
 
-`⌘⇧G`, or `kdiff` in a shell. One `kitten diff` shows **every changed file** in
-the repo in a single scrollable, syntax-highlighted, side-by-side view, each
-file under its own heading — images included.
+`⌘⇧G`, or `kdiff` in a shell. Opens [diffnav](https://github.com/dlvhdr/diffnav):
+a **file tree on the left**, GitHub style, and the syntax-highlighted diff for
+the selected file on the right — so a large change set is navigated by jumping
+between files rather than scrolling through one long buffer.
 
 ```bash
 kdiff                  # everything on this branch - the pre-merge read
 kdiff HEAD             # uncommitted only (working tree + index)
 kdiff --staged         # the index
 kdiff HEAD~3           # against an older commit
+kdiff -k               # the kitten diff view instead (renders images)
 kdiff -w               # in a new OS window (what ⌘⇧G does)
 kdiff -t               # in a new tab
 ```
@@ -149,9 +151,18 @@ default branch, falling back to `origin/master`, `origin/main`, `master`,
 `main`. On the base branch itself you get whatever is unpushed plus whatever is
 uncommitted.
 
-Inside it: `j`/`k` scroll, `n`/`p` next/previous change, `/` search, `a` all
-context, `q` quit. It is wired as git's difftool too, so plain `git difftool -d`
-gets the same view.
+Inside diffnav, `?` or `F1` lists the keys — moving between files, toggling the
+file tree, side-by-side vs unified, and search.
+
+`kitten diff` is still there as the second viewer and is the one that **renders
+images**: `kdiff -k`, or `KDIFF_VIEWER=kitten`. It is wired as git's difftool
+too, so plain `git difftool -d` gets that view. Inside it: `j`/`k` scroll,
+`n`/`p` next/previous change, `/` search, `a` all context, `q` quit.
+
+If `diffnav` is not installed, `kdiff` silently falls back to `kitten diff`, so
+a freshly restored machine still works — `brew install diffnav` to get the tree
+back. Terminal diff viewers have no draggable scrollbar (kitty has none
+anywhere); the file tree and `?`-listed jumps are what replace it.
 
 Untracked files are not shown — `git diff` does not see them.
 
@@ -366,7 +377,8 @@ defeat its purpose and `install` would delete another machine's overrides.
 diff` to see what you changed, commit, push. Export is not automatic — until you
 run it, the repo is stale. `./sync status` tells you whether it is.
 
-**On a new machine.** Install kitty, workmux and Claude Code, then:
+**On a new machine.** Install kitty, workmux, Claude Code and `diffnav`
+(`brew install diffnav`, optional — `kdiff` falls back without it), then:
 
 ```
 git clone https://github.com/arturkin/kitty-terminal.git ~/Work/terminal
