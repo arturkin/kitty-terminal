@@ -2,12 +2,16 @@
 # Whole change set in one kitten diff: file list on the left, side-by-side
 # diff on the right, syntax highlighted, images included.
 #
-#   kdiff                working tree vs HEAD
+#   kdiff                every change on this branch, committed or not
+#   kdiff HEAD           uncommitted only (working tree + index)
 #   kdiff --staged       the index
 #   kdiff HEAD~3         against an older commit
-#   kdiff main...        every change on this branch
 #   kdiff -w [args]      in a new kitty OS window
 #   kdiff -t [args]      in a new kitty tab
+#
+# Bare kdiff measures from where this branch left the base branch, so a local
+# commit does not empty it out. Base is $KDIFF_BASE, else origin's default
+# branch, else origin/master, origin/main, master, main.
 #
 # Keys inside it: j/k scroll, n/p next/previous change, / search, a all
 # context, q quit. Untracked files are not shown - git diff does not see them.
@@ -19,7 +23,7 @@ where=here
 case "${1:-}" in
   -w|--window) where=os-window; shift ;;
   -t|--tab)    where=tab;       shift ;;
-  -h|--help)   sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  -h|--help)   sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
 esac
 
 if ! git rev-parse --show-toplevel >/dev/null 2>&1; then
@@ -34,8 +38,35 @@ if [ "$where" != here ]; then
     "$0" "$@"
 fi
 
+# The base this branch forked from. Bare kdiff diffs the working tree against
+# that merge base, so committed, staged and unstaged changes all show at once.
+base_ref() {
+  local r
+  if [ -n "${KDIFF_BASE:-}" ]; then printf '%s\n' "$KDIFF_BASE"; return; fi
+  if r=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null); then
+    printf '%s\n' "$r"; return
+  fi
+  for r in origin/master origin/main master main; do
+    if git rev-parse --verify -q "$r" >/dev/null 2>&1; then printf '%s\n' "$r"; return; fi
+  done
+  printf 'HEAD\n'
+}
+
+label=
+if [ "$#" -eq 0 ]; then
+  base=$(base_ref)
+  if spec=$(git merge-base "$base" HEAD 2>/dev/null); then
+    label=" on this branch (vs $base)"
+  else
+    # No shared history with the base -- fall back to uncommitted only.
+    spec=HEAD
+    label=" (uncommitted; no merge base with $base)"
+  fi
+  set -- "$spec"
+fi
+
 if [ -z "$(git diff --name-only "$@" 2>/dev/null | head -1)" ]; then
-  echo "kdiff: no changes${*:+ for: $*}"
+  echo "kdiff: no changes${label:-${*:+ for: $*}}"
   pause; exit 0
 fi
 

@@ -134,13 +134,20 @@ the repo in a single scrollable, syntax-highlighted, side-by-side view, each
 file under its own heading — images included.
 
 ```bash
-kdiff                  # working tree vs HEAD
+kdiff                  # everything on this branch - the pre-merge read
+kdiff HEAD             # uncommitted only (working tree + index)
 kdiff --staged         # the index
 kdiff HEAD~3           # against an older commit
-kdiff main...          # everything on this branch - the pre-merge read
 kdiff -w               # in a new OS window (what ⌘⇧G does)
 kdiff -t               # in a new tab
 ```
+
+Bare `kdiff` diffs against the point where this branch left the base branch, so
+**committed, staged and unstaged changes all show at once** and a local commit
+does not empty the view. Base is `$KDIFF_BASE` if set, otherwise origin's
+default branch, falling back to `origin/master`, `origin/main`, `master`,
+`main`. On the base branch itself you get whatever is unpushed plus whatever is
+uncommitted.
 
 Inside it: `j`/`k` scroll, `n`/`p` next/previous change, `/` search, `a` all
 context, `q` quit. It is wired as git's difftool too, so plain `git difftool -d`
