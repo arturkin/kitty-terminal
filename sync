@@ -16,13 +16,24 @@ MIRROR="$REPO_DIR/home"
 MANIFEST="$REPO_DIR/MANIFEST"
 TARGET="${SYNC_HOME:-$HOME}"
 
-RSYNC_EXCLUDES=(--exclude=.DS_Store --exclude=__pycache__/ --exclude='*.pyc')
+# local.d/ is kitty's documented machine-local override point (README: "your
+# overrides, loaded last"). Mirroring it would publish this machine's overrides
+# and --delete another machine's, so it stays out in both directions.
+RSYNC_EXCLUDES=(
+  --exclude=.DS_Store --exclude=__pycache__/ --exclude='*.pyc'
+  --exclude='local.d/'
+)
 
 if [ -t 1 ]; then
   R=$'\033[31m'; G=$'\033[32m'; Y=$'\033[33m'; B=$'\033[1m'; N=$'\033[0m'
 else
   R=; G=; Y=; B=; N=
 fi
+
+# Staging dir for export; global so the EXIT trap can still see it after
+# cmd_export returns (a `local` would be out of scope, and set -u would fire).
+STAGE=""
+trap '[ -n "$STAGE" ] && rm -rf "$STAGE"; true' EXIT
 
 die()  { printf '%serror:%s %s\n' "$R" "$N" "$*" >&2; exit 1; }
 warn() { printf '%swarn:%s  %s\n'  "$Y" "$N" "$*" >&2; }
@@ -38,17 +49,26 @@ scrub_gitconfig() {
   local f="$MIRROR/.gitconfig" tmp
   [ -f "$f" ] || return 0
   tmp="$(mktemp)"
+  # git accepts "[section] key = value" on one line, so a line that starts with
+  # a section header may still carry a credential. Split those before testing
+  # the key, or the token rides into the repo inside the header line.
   awk '
-    /^[[:space:]]*\[/ { held = $0; kept = 0; next }
     {
-      key = $0
+      line = $0
+      if (match(line, /^[[:space:]]*\[[^]]*\]/)) {
+        held = substr(line, RSTART, RLENGTH); kept = 0
+        line = substr(line, RSTART + RLENGTH)
+        sub(/^[[:space:]]+/, "", line)
+        if (line == "") next
+        line = "\t" line
+      }
+      key = line
       sub(/^[[:space:]]+/, "", key)
       sub(/[[:space:]]*=.*$/, "", key)
       if (tolower(key) ~ /^(token|password|oauthtoken|accesstoken|apikey)$/) next
       if (held != "" && !kept) { print held; kept = 1 }
-      print
+      print line
     }
-    END { }
   ' "$f" > "$tmp"
   if ! cmp -s "$f" "$tmp"; then
     printf '  %sscrubbed%s credential keys out of .gitconfig\n' "$G" "$N"
@@ -104,16 +124,18 @@ SECRET_PATTERNS=(
   '(token|password|secret|api[_-]?key)[[:space:]]*[=:][[:space:]]*["'"'"']?[A-Za-z0-9/+_-]{24,}'
 )
 
+# Scans $1 (default: the whole repo, minus .git). Docs at the repo root ship
+# too, so scanning only home/ would miss a secret pasted into the README.
 cmd_scan() {
-  local hits=0 pat out
+  local root="${1:-$REPO_DIR}" hits=0 pat out
   for pat in "${SECRET_PATTERNS[@]}"; do
-    if out="$(grep -rInIE "$pat" "$MIRROR" 2>/dev/null)"; then
+    if out="$(grep -rInIE --exclude-dir=.git "$pat" "$root" 2>/dev/null)"; then
       printf '%s%s%s\n' "$R" "$out" "$N"
       hits=1
     fi
   done
   if [ "$hits" -eq 1 ]; then
-    die "possible secrets in home/ (above). Remove them before committing."
+    die "possible secrets found (above). Remove them before committing."
   fi
   printf '  %sscan clean%s\n' "$G" "$N"
 }
@@ -121,10 +143,16 @@ cmd_scan() {
 # --- commands --------------------------------------------------------------
 cmd_export() {
   printf '%sexport%s  %s -> %s\n' "$B" "$N" "$TARGET" "$MIRROR"
+  # Staged, because cmd_scan aborts on a hit: writing straight into the repo
+  # would leave the secret in the working tree for the next `git add -A`.
   local e
-  while read -r e; do copy_one "$TARGET" "$MIRROR" "$e"; done < <(entries)
-  export_mcp
-  scrub_gitconfig
+  STAGE="$(mktemp -d)"
+  while read -r e; do copy_one "$TARGET" "$STAGE" "$e"; done < <(entries)
+  MIRROR="$STAGE" export_mcp
+  MIRROR="$STAGE" scrub_gitconfig
+  cmd_scan "$STAGE"
+  while read -r e; do copy_one "$STAGE" "$MIRROR" "$e"; done < <(entries)
+  rsync -a "$STAGE/.claude/mcp-servers.json" "$MIRROR/.claude/mcp-servers.json" 2>/dev/null || true
   cmd_scan
   printf '\nDone. Review with %sgit status%s / %sgit diff%s, then commit.\n' "$B" "$N" "$B" "$N"
 }
@@ -152,7 +180,9 @@ cmd_install() {
 
   printf '\n'
   if [ "$backed_up" -eq 1 ]; then
-    printf 'Replaced files were backed up to %s%s%s\n' "$B" "$backup" "$N"
+    printf 'Backed up to %s%s%s\n' "$B" "$backup" "$N"
+    printf 'Note: directory entries are %sreplaced wholesale%s -- a file at home\n' "$B" "$N"
+    printf 'that the repo has no counterpart for is removed (recover it above).\n' 
   else
     printf 'Nothing existed to back up.\n'
   fi
@@ -180,12 +210,15 @@ cmd_status() {
     if ! diff -rq --exclude=.DS_Store --exclude=__pycache__ \
          "${src%/}" "${dst%/}" >/dev/null 2>&1; then
       printf '%sdiffers%s %s\n' "$Y" "$N" "$e"
-      diff -rq --exclude=.DS_Store --exclude=__pycache__ \
-        "${src%/}" "${dst%/}" 2>&1 | sed 's/^/    /'
+      # `|| true`: diff exits non-zero by design here, and pipefail + set -e
+      # would abort the loop after the first differing entry.
+      { diff -rq --exclude=.DS_Store --exclude=__pycache__ \
+          "${src%/}" "${dst%/}" 2>&1 || true; } | sed 's/^/    /'
       clean=0
     fi
   done < <(entries)
   [ "$clean" -eq 1 ] && printf '%shome and repo agree%s\n' "$G" "$N"
+  true
   printf '\n(.gitconfig always differs: the repo copy has credentials stripped.)\n'
 }
 

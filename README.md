@@ -351,6 +351,10 @@ which is how Claude Code's runtime state (`history.jsonl`, `projects/`,
 is left out on purpose: `settings.json` already carries `enabledPlugins` and
 `extraKnownMarketplaces`, so Claude Code reinstalls them itself.
 
+`~/.config/kitty/local.d/*.conf` is deliberately *not* mirrored, in either
+direction — it is the machine-local override point, so publishing it would
+defeat its purpose and `install` would delete another machine's overrides.
+
 **The loop.** Edit config where it normally lives, then `./sync export && git
 diff` to see what you changed, commit, push. Export is not automatic — until you
 run it, the repo is stale. `./sync status` tells you whether it is.
@@ -363,7 +367,9 @@ cd ~/Work/terminal && ./sync install
 ```
 
 Anything it would have overwritten is moved to `~/.config-backup-<timestamp>/`
-first, and it prints where. Two things it deliberately does not do, and says so
+first, and it prints where. Directory entries (`kitty/`, `wt/`, `commands/`,
+`skills/`, `hooks/`) are replaced **wholesale**: a file sitting at home that the
+repo has no counterpart for is removed, recoverable only from that backup. Two things it deliberately does not do, and says so
 when it finishes:
 
 - **Git credentials.** The repo's `.gitconfig` has `token`, `password` and
