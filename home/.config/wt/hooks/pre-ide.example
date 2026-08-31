@@ -1,0 +1,2 @@
+#!/usr/bin/env bash
+echo "[hook pre-ide] ide=$WT_IDE wt=$WT_PATH main=$WT_MAIN"

@@ -1,0 +1,4 @@
+# Copy to <repo-root>/.wtrc to override per repository.
+# WT_IDE=phpstorm
+# WT_LINK_NAMES="node_modules vendor .env .env.local .yarn"
+# WT_CLONE_NAMES=".env .env.local"

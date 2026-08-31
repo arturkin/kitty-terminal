@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+# Shortcut and command cheat sheet. Bound to F1 and ALT+/ in kitty.conf,
+# where it opens as an overlay over the current pane; also runnable as
+# `wt-help`. Any key closes it.
+#   --plain   no colours, no clear, no keypress (for pipes and /shortcuts)
+set -uo pipefail
+
+PLAIN=0
+[ "${1:-}" = "--plain" ] && PLAIN=1
+
+if [ "$PLAIN" = 0 ] && [ -t 1 ] && [ "$(tput colors 2>/dev/null || echo 0)" -ge 8 ]; then
+  B=$'\033[1m'; D=$'\033[2m'; A=$'\033[38;5;111m'; K=$'\033[38;5;255m'; R=$'\033[0m'
+else
+  B=''; D=''; A=''; K=''; R=''
+fi
+
+key() { printf "  ${K}%-14s${R} %s\n" "$1" "$2"; }
+cmd() { printf "  ${A}%-24s${R} %s\n" "$1" "$2"; }
+head_() { printf "\n${B}%s${R}\n" "$1"; }
+
+[ "$PLAIN" = 0 ] && clear
+printf "${A}${B}  Worktree Console${R}${D}  ·  kitty + workmux${R}\n"
+
+head_ "Panes and tabs"
+key "ALT+H/J/K/L"  "move between panes"
+key "ALT+Z"        "zoom / unzoom this pane (stack layout)"
+key "CMD+D"        "split right"
+key "CMD+SHIFT+D"  "split down"
+key "CMD+T"        "new tab"
+key "CMD+W"        "close this pane"
+key "CMD+N"        "new window"
+key "CMD+K"        "clear the screen and the scrollback"
+key "ALT+="        "re-even the grid (equalize) - also automatic on close"
+
+head_ "Window and zoom"
+key "CMD+= / CMD+-" "bigger / smaller text - the window keeps its size, so"
+key ""             "  the panes just gain or lose cells"
+key "CMD+0"        "back to the configured font size"
+key "CMD+CTRL+F"   "fullscreen (or the green button in the titlebar)"
+
+head_ "Reading output"
+key "CTRL+SHIFT+G"  "the last command's output alone, in a pager"
+key "CTRL+SHIFT+H"  "the whole scrollback, in a pager"
+key "CTRL+SHIFT+Z"  "jump to the previous prompt"
+key "CTRL+SHIFT+X"  "jump to the next prompt"
+
+head_ "Diff"
+key "CMD+SHIFT+G"   "every change in this repo, side by side, in its own window"
+cmd "kdiff"                   "...here in this pane (--staged, HEAD~3, main... all work)"
+cmd "kdiff -w / -t"           "...in a new OS window / tab"
+
+head_ "IDE"
+key "ALT+O"        "open the right IDE on this worktree (auto-detected)"
+key "ALT+I"        "open the other IDE"
+
+head_ "Session"
+key "CMD+ALT+S"    "snapshot the workspace (tabs, panes, dirs, agents)"
+key "CMD+ALT+R"    "rebuild the last snapshot, resuming agents"
+key "CMD+SHIFT+R"  "reload kitty config"
+key "F1 / ALT+/"   "this sheet"
+cmd "kitty-session ls"        "snapshots on disk (latest is saved for you)"
+cmd "kitty-session restore"   "...same as CMD+ALT+R; --dry-run, --no-agents"
+
+head_ "Worktrees - in THIS pane"
+cmd "wt NAME"                 "worktree + branch + agent, right here (no new tab)"
+cmd "wt NAME some prompt"     "...with a starting prompt"
+cmd "wt -"                    "cd back to the main checkout"
+cmd "wt -l"                   "list worktrees"
+
+head_ "Worktrees - in a new tab"
+cmd "workmux add NAME"        "worktree + branch + tab + agent"
+cmd "workmux add NAME -p ..." "...with a starting prompt"
+cmd "workmux ls"              "what is alive"
+cmd "workmux dashboard"       "TUI: every agent and its status"
+cmd "workmux merge"           "merge, then clean up worktree/tab/branch"
+cmd "workmux remove NAME"     "drop it without merging"
+
+head_ "Images"
+cmd "icat FILE"               "show an image in the pane"
+cmd "ilast [DIR]"             "the newest image here (or in DIR)"
+cmd "iclear"                  "wipe images out of the pane"
+
+head_ "Seeding"
+cmd "wt-link"                 "re-seed this worktree (.idea, node_modules, .env)"
+cmd "wt-ide [--other]"        "seed, then open an IDE"
+
+printf "\n${D}  Notifications: agents when they need you or finish a long turn;${R}\n"
+printf "${D}  any command over 10s in a pane you are not watching. Click one to jump there${R}\n"
+printf "${D}  Dashboard: the Agents tab jumps to a pane; the Worktrees tab opens a new tab${R}\n"
+printf "${D}  ALT means the LEFT option key - right option still types accented characters${R}\n"
+printf "${D}  IDE choice: .wtrc WT_IDE > .idea/php.xml > composer.json > *.php > WebStorm${R}\n"
+printf "${D}  Config: ~/.config/kitty/kitty.conf, ~/.config/wt/config.sh, <repo>/.wtrc${R}\n"
+printf "${D}  Docs:   ~/Work/terminal/README.md and development.md${R}\n"
+
+if [ "$PLAIN" = 0 ]; then
+  printf "\n${D}  press any key to close${R}"
+  read -rsn1 </dev/tty 2>/dev/null || true
+  echo
+fi

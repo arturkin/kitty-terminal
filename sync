@@ -1,0 +1,198 @@
+#!/usr/bin/env bash
+#
+# sync -- move config between $HOME and this repo.
+#
+#   ./sync export    home -> repo   (then scrub secrets, then scan)
+#   ./sync install   repo -> home   (backs up anything it overwrites)
+#   ./sync status    dry run: what differs, in which direction
+#   ./sync scan      secret scan over home/ on its own
+#
+# Set SYNC_HOME to point at a directory other than $HOME (used by the tests).
+
+set -euo pipefail
+
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+MIRROR="$REPO_DIR/home"
+MANIFEST="$REPO_DIR/MANIFEST"
+TARGET="${SYNC_HOME:-$HOME}"
+
+RSYNC_EXCLUDES=(--exclude=.DS_Store --exclude=__pycache__/ --exclude='*.pyc')
+
+if [ -t 1 ]; then
+  R=$'\033[31m'; G=$'\033[32m'; Y=$'\033[33m'; B=$'\033[1m'; N=$'\033[0m'
+else
+  R=; G=; Y=; B=; N=
+fi
+
+die()  { printf '%serror:%s %s\n' "$R" "$N" "$*" >&2; exit 1; }
+warn() { printf '%swarn:%s  %s\n'  "$Y" "$N" "$*" >&2; }
+
+entries() {
+  grep -v '^[[:space:]]*#' "$MANIFEST" | grep -v '^[[:space:]]*$'
+}
+
+# --- .gitconfig ------------------------------------------------------------
+# Drops credential keys and any section left empty by that. The token in
+# ~/.gitconfig must never reach the repo.
+scrub_gitconfig() {
+  local f="$MIRROR/.gitconfig" tmp
+  [ -f "$f" ] || return 0
+  tmp="$(mktemp)"
+  awk '
+    /^[[:space:]]*\[/ { held = $0; kept = 0; next }
+    {
+      key = $0
+      sub(/^[[:space:]]+/, "", key)
+      sub(/[[:space:]]*=.*$/, "", key)
+      if (tolower(key) ~ /^(token|password|oauthtoken|accesstoken|apikey)$/) next
+      if (held != "" && !kept) { print held; kept = 1 }
+      print
+    }
+    END { }
+  ' "$f" > "$tmp"
+  if ! cmp -s "$f" "$tmp"; then
+    printf '  %sscrubbed%s credential keys out of .gitconfig\n' "$G" "$N"
+  fi
+  mv "$tmp" "$f"
+  chmod 644 "$f"
+}
+
+# --- MCP servers -----------------------------------------------------------
+# ~/.claude.json is mostly machine state (oauth account, project history), so
+# only the mcpServers block travels, as a reference file install replays.
+export_mcp() {
+  local src="$TARGET/.claude.json" out="$MIRROR/.claude/mcp-servers.json"
+  [ -f "$src" ] || return 0
+  mkdir -p "$(dirname "$out")"
+  python3 - "$src" "$out" <<'PY'
+import json, sys
+src, out = sys.argv[1], sys.argv[2]
+with open(src) as fh:
+    servers = json.load(fh).get("mcpServers", {})
+with open(out, "w") as fh:
+    json.dump(servers, fh, indent=2, sort_keys=True)
+    fh.write("\n")
+print(f"  exported {len(servers)} MCP server(s)")
+PY
+}
+
+# --- copy helpers ----------------------------------------------------------
+copy_one() {  # copy_one <src-root> <dst-root> <entry>
+  local src="$1/$3" dst="$2/$3"
+  case "$3" in
+    */)
+      [ -d "${src%/}" ] || { warn "missing, skipped: ${src%/}"; return 0; }
+      mkdir -p "${dst%/}"
+      rsync -a --delete "${RSYNC_EXCLUDES[@]}" "${src%/}/" "${dst%/}/"
+      ;;
+    *)
+      [ -f "$src" ] || { warn "missing, skipped: $src"; return 0; }
+      mkdir -p "$(dirname "$dst")"
+      rsync -a "${RSYNC_EXCLUDES[@]}" "$src" "$dst"
+      ;;
+  esac
+}
+
+# --- scan ------------------------------------------------------------------
+SECRET_PATTERNS=(
+  'gh[pousr]_[A-Za-z0-9]{20,}'
+  'github_pat_[A-Za-z0-9_]{20,}'
+  'AKIA[0-9A-Z]{16}'
+  '-----BEGIN [A-Z ]*PRIVATE KEY-----'
+  'xox[baprs]-[A-Za-z0-9-]{10,}'
+  'sk-ant-[A-Za-z0-9_-]{20,}'
+  '(token|password|secret|api[_-]?key)[[:space:]]*[=:][[:space:]]*["'"'"']?[A-Za-z0-9/+_-]{24,}'
+)
+
+cmd_scan() {
+  local hits=0 pat out
+  for pat in "${SECRET_PATTERNS[@]}"; do
+    if out="$(grep -rInIE "$pat" "$MIRROR" 2>/dev/null)"; then
+      printf '%s%s%s\n' "$R" "$out" "$N"
+      hits=1
+    fi
+  done
+  if [ "$hits" -eq 1 ]; then
+    die "possible secrets in home/ (above). Remove them before committing."
+  fi
+  printf '  %sscan clean%s\n' "$G" "$N"
+}
+
+# --- commands --------------------------------------------------------------
+cmd_export() {
+  printf '%sexport%s  %s -> %s\n' "$B" "$N" "$TARGET" "$MIRROR"
+  local e
+  while read -r e; do copy_one "$TARGET" "$MIRROR" "$e"; done < <(entries)
+  export_mcp
+  scrub_gitconfig
+  cmd_scan
+  printf '\nDone. Review with %sgit status%s / %sgit diff%s, then commit.\n' "$B" "$N" "$B" "$N"
+}
+
+cmd_install() {
+  local stamp backup e src dst backed_up=0
+  stamp="$(date +%Y%m%d-%H%M%S)"
+  backup="$TARGET/.config-backup-$stamp"
+  printf '%sinstall%s %s -> %s\n' "$B" "$N" "$MIRROR" "$TARGET"
+
+  while read -r e; do
+    src="$MIRROR/$e"; dst="$TARGET/$e"
+    case "$e" in
+      */) [ -d "${src%/}" ] || { warn "not in repo, skipped: $e"; continue; } ;;
+      *)  [ -f "$src" ]     || { warn "not in repo, skipped: $e"; continue; } ;;
+    esac
+    if [ -e "${dst%/}" ]; then
+      mkdir -p "$(dirname "$backup/$e")"
+      rsync -a "${dst%/}" "$(dirname "$backup/$e")/"
+      backed_up=1
+    fi
+    copy_one "$MIRROR" "$TARGET" "$e"
+    printf '  %s+%s %s\n' "$G" "$N" "$e"
+  done < <(entries)
+
+  printf '\n'
+  if [ "$backed_up" -eq 1 ]; then
+    printf 'Replaced files were backed up to %s%s%s\n' "$B" "$backup" "$N"
+  else
+    printf 'Nothing existed to back up.\n'
+  fi
+
+  printf '\n%sTwo things install does not do for you:%s\n' "$B" "$N"
+  printf '  1. .gitconfig ships without credentials. Authenticate with\n'
+  printf '     %sgh auth login%s rather than putting a token back in the file.\n' "$B" "$N"
+  if [ -f "$MIRROR/.claude/mcp-servers.json" ]; then
+    printf '  2. MCP servers are not merged into ~/.claude.json. Add them with:\n'
+    python3 - "$MIRROR/.claude/mcp-servers.json" <<'PY'
+import json, shlex, sys
+with open(sys.argv[1]) as fh:
+    for name, cfg in json.load(fh).items():
+        print(f"       claude mcp add-json {shlex.quote(name)} {shlex.quote(json.dumps(cfg))}")
+PY
+  else
+    printf '  2. (no MCP servers recorded)\n'
+  fi
+}
+
+cmd_status() {
+  local e src dst clean=1
+  while read -r e; do
+    src="$TARGET/$e"; dst="$MIRROR/$e"
+    if ! diff -rq --exclude=.DS_Store --exclude=__pycache__ \
+         "${src%/}" "${dst%/}" >/dev/null 2>&1; then
+      printf '%sdiffers%s %s\n' "$Y" "$N" "$e"
+      diff -rq --exclude=.DS_Store --exclude=__pycache__ \
+        "${src%/}" "${dst%/}" 2>&1 | sed 's/^/    /'
+      clean=0
+    fi
+  done < <(entries)
+  [ "$clean" -eq 1 ] && printf '%shome and repo agree%s\n' "$G" "$N"
+  printf '\n(.gitconfig always differs: the repo copy has credentials stripped.)\n'
+}
+
+case "${1:-}" in
+  export)  cmd_export ;;
+  install) cmd_install ;;
+  status)  cmd_status ;;
+  scan)    cmd_scan ;;
+  *) die "usage: ./sync {export|install|status|scan}" ;;
+esac

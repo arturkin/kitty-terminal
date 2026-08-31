@@ -1,0 +1,12 @@
+.DS_Store
+*.bak
+*.bak-*
+.config-backup-*
+__pycache__/
+*.pyc
+
+# ~/.config/git/ignore excludes **/.claude/settings.local.json so that per-repo
+# permission overrides stay local. The one under home/ is this machine's own
+# config and is the point of this repo, so it is re-included here -- a repo
+# .gitignore outranks core.excludesFile.
+!home/.claude/settings.local.json

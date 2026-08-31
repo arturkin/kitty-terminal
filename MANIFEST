@@ -1,0 +1,39 @@
+# Paths tracked by ./sync, relative to $HOME.
+# A trailing slash means "mirror this whole directory" (export deletes repo
+# copies of files you removed at home). Everything else is a single file.
+# This is a whitelist: anything not listed here never enters the repo.
+
+# --- shell / git ---------------------------------------------------------
+.zshrc
+.gitconfig
+
+# --- kitty ---------------------------------------------------------------
+.config/kitty/
+
+# --- wt (worktree-in-this-pane helper) -----------------------------------
+.config/wt/
+
+# --- workmux -------------------------------------------------------------
+.config/workmux/config.yaml
+
+# --- Claude Code ---------------------------------------------------------
+# Config only. Runtime state (history.jsonl, projects/, sessions/,
+# .credentials.json, caches, logs) is deliberately absent.
+# plugins/ is absent too: settings.json carries enabledPlugins and
+# extraKnownMarketplaces, so Claude Code reinstalls them itself.
+.claude/settings.json
+.claude/settings.local.json
+.claude/CLAUDE.md
+.claude/statusline.sh
+.claude/commands/
+.claude/skills/
+.claude/hooks/
+
+# --- scripts -------------------------------------------------------------
+.local/bin/kitty-session
+.local/bin/kitty-notify
+.local/bin/kdiff
+.local/bin/wt-help
+.local/bin/wt-ide
+.local/bin/wt-link
+.local/bin/phpstorm

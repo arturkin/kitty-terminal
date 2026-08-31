@@ -1,0 +1,20 @@
+[user]
+	name = arturkin
+	email = i@arturkin.com
+[filter "lfs"]
+	clean = git-lfs clean -- %f
+	smudge = git-lfs smudge -- %f
+	process = git-lfs filter-process
+	required = true
+[init]
+	defaultBranch = master
+[alias]
+	recent = branch --sort=-committerdate
+[core]
+	autocrlf = input
+[diff]
+	tool = kitty
+[difftool]
+	prompt = false
+[difftool "kitty"]
+	cmd = kitten diff \"$LOCAL\" \"$REMOTE\"

@@ -1,0 +1,18 @@
+{
+  "chrome-devtools": {
+    "args": [
+      "chrome-devtools-mcp@latest"
+    ],
+    "command": "npx",
+    "env": {},
+    "type": "stdio"
+  },
+  "phpstorm": {
+    "type": "http",
+    "url": "http://127.0.0.1:64442/stream"
+  },
+  "webstorm": {
+    "type": "sse",
+    "url": "http://127.0.0.1:64343/sse"
+  }
+}

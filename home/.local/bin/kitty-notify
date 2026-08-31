@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Desktop notification through kitty, tied to the pane it came from.
+#
+#   kitty-notify [-i ID] [-u low|normal|critical] [-n ICON] [-s SOUND] [-W WINID] TITLE [BODY...]
+#
+# Delivery is via kitty's remote control (`kitten @ kitten notify`), so the
+# escape code never touches the pane's tty - a TUI like Claude Code running
+# there is not disturbed, and clicking the notification focuses that pane.
+# Falls back to /dev/tty, then to osascript outside kitty.
+set -uo pipefail
+
+ident=""; urgency="normal"; icon=""; sound=""; win="${KITTY_WINDOW_ID:-}"
+while getopts "i:u:n:s:W:" o; do
+  case $o in
+    i) ident=$OPTARG ;; u) urgency=$OPTARG ;; n) icon=$OPTARG ;;
+    s) sound=$OPTARG ;; W) win=$OPTARG ;;
+  esac
+done
+shift $((OPTIND - 1))
+[ $# -gt 0 ] || { echo "usage: kitty-notify [-i ID] [-u URGENCY] TITLE [BODY...]" >&2; exit 2; }
+
+title=$1; shift
+body="$*"
+
+args=(--app-name "kitty" --urgency "$urgency" --type agent)
+[ -n "$ident" ]  && args+=(--identifier "$ident")
+[ -n "$icon" ]   && args+=(--icon "$icon")
+[ -n "$sound" ]  && args+=(--sound-name "$sound")
+
+if [ -n "$win" ] && command -v kitten >/dev/null 2>&1; then
+  to=()
+  [ -n "${KITTY_LISTEN_ON:-}" ] && to=(--to "$KITTY_LISTEN_ON")
+  kitten @ "${to[@]}" kitten --match "id:$win" notify "${args[@]}" "$title" "$body" 2>/dev/null && exit 0
+fi
+
+if [ -n "${KITTY_WINDOW_ID:-}" ] && command -v kitten >/dev/null 2>&1 && [ -w /dev/tty ]; then
+  kitten notify "${args[@]}" "$title" "$body" >/dev/tty 2>/dev/null && exit 0
+fi
+
+osascript -e "display notification $(printf '%s' "$body" | sed 's/"/\\"/g;s/^/"/;s/$/"/') with title \"${title//\"/\\\"}\"" >/dev/null 2>&1

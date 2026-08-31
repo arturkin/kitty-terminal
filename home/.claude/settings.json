@@ -1,0 +1,211 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep:*)",
+      "Bash(yarn type-check:*)",
+      "mcp__ide__getDiagnostics",
+      "Bash(find:*)",
+      "WebFetch(domain:chillicream.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(ls:*)",
+      "Bash(node --version && cat /Users/arturkin/Work/monorepo/src/js/web/tmp/README.md 2>/dev/null)",
+      "Bash(yarn lint:ts:*)",
+      "Read(//Users/arturkin/.claude/projects/**)",
+      "Read(//Users/arturkin/.claude/**)",
+      "Bash(cd /Users/arturkin/Work/monorepo/src/js/web && npx tsc --noEmit --pretty src/components/features/TourBookingWidget/utils/tourBookingWidgetUtils.tsx src/components/features/TourBookingWidget/BookingWidgetState.tsx 2>&1 | head -50)",
+      "WebSearch",
+      "Bash(git -C /Users/arturkin/Documents/work/projects/github-workflows remote get-url origin)",
+      "mcp__claude_ai_Sentry__get_issue_details",
+      "Bash(cd src/js/web && npm run test -- src/utils/__tests__/fetchUtils.test.ts --no-coverage 2>&1 | tail -30)",
+      "Bash(cd src/js/web && npm run test -- src/utils/__tests__/fetchUtils.test.ts --no-coverage 2>&1 | tail -25)",
+      "mcp__claude_ai_Asana__get_user",
+      "mcp__claude_ai_Asana__search_objects",
+      "mcp__claude_ai_Asana__create_task_preview",
+      "mcp__claude_ai_Asana__create_task_confirm",
+      "Bash(cd /Users/arturkin/Work/monorepo/src/js/web && npx eslint --no-eslintrc -c .eslintrc.js src/utils/__tests__/fetchUtils.test.ts src/utils/fetchUtils.ts 2>&1 | head -50)",
+      "Bash(npx eslint:*)",
+      "Bash(npm test:*)",
+      "WebFetch(domain:guidetoiceland.is)",
+      "WebFetch(domain:cn.guidetoiceland.is)",
+      "Bash(npx jest:*)",
+      "Bash(npx tsc:*)",
+      "Read(//Users/arturkin/Work/guide/**)",
+      "Read(//Users/arturkin/Work/**)",
+      "Bash(2)",
+      "Bash(yarn format:*)",
+      "Bash(curl -s \"http://localhost:3000/trips-and-experiences/greenland-photo-workshops/midnight-sun-in-greenland-photo-workshop\")",
+      "Bash(yarn add *)",
+      "Bash(npx stylelint *)",
+      "mcp__webstorm__get_file_problems",
+      "mcp__webstorm__replace_text_in_file",
+      "Bash(npx prettier *)",
+      "Bash(node_modules/.bin/eslint src/components/features/ContentPage src/components/ui/ImageLightbox/lightboxDynamicModule.tsx --ext .ts,.tsx --quiet)",
+      "Bash(node_modules/.bin/eslint src/components/features/ContentPage src/components/ui/ImageLightbox/lightboxDynamicModule.tsx --ext .ts,.tsx --fix --quiet)",
+      "Bash(node_modules/.bin/eslint src/components/features/ContactUs src/components/ui/ArticleLayout src/components/ui/ArticleWidget src/components/ui/ArticleCMS src/utils/csrfUtils.ts src/pages/contentPage.tsx src/shared/contentPageRoutes.ts --ext .ts,.tsx --quiet)",
+      "Bash(git check-ignore *)",
+      "Bash(git *)",
+      "Bash(xargs -I{} echo {})",
+      "Bash(sed -n '55,65p' /Users/arturkin/Work/monorepo/src/js/web/tsconfig.json)",
+      "Bash(sed -n '15,30p' /Users/arturkin/Work/monorepo/src/js/web/.eslintrc.js)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(npx js-yaml *)",
+      "Bash(mkdir -p /tmp/lh-corrupt-test/lighthouse/data)",
+      "Bash(cp lighthouse-reports/summary.json /tmp/lh-corrupt-test/lighthouse/summary.json)",
+      "Bash(echo 'this is not valid json{{{')",
+      "Bash(DATA_DIR=/tmp/lh-corrupt-test/lighthouse node scripts/ci/lighthouse-dashboard.mjs)",
+      "Bash(echo \"---exit code: $?---\")",
+      "Bash(echo '{\"notRuns\": \"wrong shape\"}')",
+      "Read(//private/tmp/lh-corrupt-test/lighthouse/**)",
+      "Bash(rm -rf /tmp/lh-retention-test)",
+      "Bash(mkdir -p /tmp/lh-retention-test/lighthouse/data)",
+      "Bash(DATA_DIR=/tmp/lh-retention-test/lighthouse node scripts/ci/lighthouse-dashboard.mjs)",
+      "Read(//tmp/lh-retention-test/lighthouse/**)",
+      "Bash(rm -rf /tmp/lh-v)",
+      "Bash(mkdir -p /tmp/lh-v/lighthouse/data)",
+      "Bash(DATA_DIR=/tmp/lh-v/lighthouse node scripts/ci/lighthouse-dashboard.mjs)",
+      "Bash(lsof -ti:8765)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:8766/index.html)",
+      "Bash(open *)",
+      "mcp__claude_ai_Slite__get-note",
+      "mcp__claude_ai_Asana__get_task",
+      "Bash(gh pr *)",
+      "Bash(gcloud logging read 'resource.type=\"k8s_container\" *)",
+      "Bash(sort -k2)",
+      "Bash(yarn info *)",
+      "Bash(yarn npm *)",
+      "Bash(yarn install *)",
+      "Bash(yarn jest *)",
+      "Bash(go build *)",
+      "Bash(go test *)",
+      "Bash(echo \"exit $?\")",
+      "Bash(yarn test *)",
+      "Bash(yarn lint *)",
+      "Bash(go vet *)"
+    ],
+    "ask": [
+      "Bash(git push:*)"
+    ],
+    "defaultMode": "auto"
+  },
+  "model": "opus",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.command' | grep -qiE '\\bgit\\b[^|;&]*\\bpush\\b' && echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"ask\",\"permissionDecisionReason\":\"git push requires your explicit confirmation\"}}' || true"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/hooks/kitty-notify.py"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/hooks/kitty-notify.py"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/hooks/kitty-notify.py"
+          }
+        ]
+      }
+    ]
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "~/.claude/statusline.sh"
+  },
+  "enabledPlugins": {
+    "typescript-lsp@claude-plugins-official": true,
+    "gopls-lsp@claude-plugins-official": true,
+    "php-lsp@claude-plugins-official": true,
+    "superpowers@claude-plugins-official": true,
+    "claude-md-management@claude-plugins-official": true,
+    "phpstorm-plugin@phpstorm-marketplace": true,
+    "swift-lsp@claude-plugins-official": true,
+    "workmux-status@workmux": true
+  },
+  "extraKnownMarketplaces": {
+    "phpstorm-marketplace": {
+      "source": {
+        "source": "github",
+        "repo": "jetbrains/phpstorm-claude-marketplace"
+      }
+    },
+    "workmux": {
+      "source": {
+        "source": "github",
+        "repo": "raine/workmux"
+      }
+    }
+  },
+  "effortLevel": "high",
+  "modelSettings": {
+    "claude-fable-5": {
+      "effortLevel": "medium"
+    }
+  },
+  "tui": "default",
+  "skipWorkflowUsageWarning": true,
+  "editorMode": "normal",
+  "autoContinueAtUsageLimit": false,
+  "remoteControlAtStartup": false,
+  "agentPushNotifEnabled": true,
+  "skipAutoPermissionPrompt": true,
+  "autoMode": {
+    "soft_deny": [
+      "$defaults",
+      "Bash(.bin/deploy-helm-prod.sh:*) in GuideToIceland/monorepo \u2014 prod Helm deploy script",
+      "Bash(.bin/cleanup-helm-prod.sh:*) in GuideToIceland/monorepo \u2014 prod Helm cleanup/delete script",
+      "Bash(.bin/uninstall-helm-prod.sh:*) in GuideToIceland/monorepo \u2014 prod Helm uninstall script"
+    ],
+    "environment": [
+      "### Org-wide",
+      "**Organization**: GuideToIceland (github.com/GuideToIceland) \u2014 Travelshift",
+      "**Cloud provider(s)**: Google Cloud Platform (GCP) \u2014 Artifact Registry (europe-west2-npm.pkg.dev); AWS ECR also referenced (208676797693.dkr.ecr.eu-west-1.amazonaws.com)",
+      "**Repository visibility**: not queryable here \u2014 assuming private (default)",
+      "**Internal sharing / snippet hosting**: None configured \u2014 treat public paste/gist services as outside the trust boundary",
+      "**Secrets management**: Doppler (per CLAUDE.md \u2014 \"No secrets in code. Use environment variables, Doppler, or appsettings\"; \"No .env files in the repo\")",
+      "**Default / protected branches**: master (default branch); protection status not queryable here via gh \u2014 treat master as protected by convention pending verification",
+      "**CI/CD deploy targets**: GKE via Helm (helm/*/prod-values.yaml, helm/*/stage-values.yaml); deploy scripts in .bin/ (deploy-helm-prod.sh, deploy-helm-stage.sh, cleanup-helm-prod.sh, uninstall-helm-prod.sh, etc.)",
+      "**Network posture**: None configured",
+      "**Source control**: GuideToIceland/monorepo (origin: https://github.com/GuideToIceland/monorepo.git) \u2014 this repo and its remote only",
+      "**Trusted internal domains**: guidetoiceland.is (from .gitignore cert path secure.dev.guidetoiceland.is+3-key.pem)",
+      "**Trusted cloud buckets**: assets-web-staging-tshiftcdn (config-derived \u2014 not a confirmed upload destination; uploads of local data still require confirmation)",
+      "**Key internal services**: europe-west2-npm.pkg.dev (Google Artifact Registry, @travelshift npm scope); 208676797693.dkr.ecr.eu-west-1.amazonaws.com (AWS ECR)",
+      "**Internal package registry**: europe-west2-npm.pkg.dev (Google Artifact Registry \u2014 @travelshift scope, per CLAUDE.md)",
+      "**Sensitive data locations & audiences**: CI secrets referenced in workflows (BROWSERSTACK_ACCESS_KEY, GCP_SA_KEY_PROD, GCP_SA_KEY_STAGE, GITHUB_TOKEN, GTIBOT_REPO_TOKEN, PROJECT_ID_PROD, PROJECT_ID_STAGE, UI_AUTOMATION_AQUALITY_TOKEN) \u2014 names only, never values; .env and TLS key files (.gitignore); PII noted in .NET service docs (service-profile GDPR erasure, payments PCI scope) \u2014 share only with audiences cleared at the [named+specifics] bar",
+      "**Data retention / declassification**: None configured",
+      "**Sensitive remote targets**: any host/namespace with `prod`/`production` as a whole segment \u2014 e.g. helm/*/prod-values.yaml releases, .bin/deploy-helm-prod.sh, .bin/cleanup-helm-prod.sh, .bin/uninstall-helm-prod.sh, .bin/prod-envs.sh, GCP_SA_KEY_PROD/PROJECT_ID_PROD-scoped deploys, infrastructure/clickhouse/prod/",
+      "**Protected deployment namespaces / environments**: prod Helm releases (helm/*/prod-values.yaml across connector-*, service-*, importer-*, admin-system, clientapi, etc.) and stage releases as secondary (helm/*/stage-values.yaml, .bin/deploy-helm-stage.sh)",
+      "**Protected IaC scopes**: IAM, RBAC, networking, quota, node-pool resources; anything tagged prod/production \u2014 includes infrastructure/pulumi, infrastructure/gcp, infrastructure/clickhouse/prod/, and Helm prod-values.yaml releases",
+      "### User-specific",
+      "**Primary use of Claude Code**: software development (Travelshift monorepo \u2014 JS/TS, .NET, Go, PHP services; Helm/Pulumi IaC)",
+      "**Trusted repo**: GuideToIceland/monorepo (this repo, working directory /Users/arturkin/Work/monorepo-nl-link) and its origin remote only",
+      "**Org-specific CLIs**: gcloud (GCP auth for Artifact Registry token), doppler (secrets), helm, kubectl, gh, coderabbit",
+      "**routine under src/js/web/ prefix**: npm/yarn workspace commands (npm run, yarn run) per CLAUDE.md build/test instructions"
+    ]
+  },
+  "ENABLE_LSP_TOOL": true
+}

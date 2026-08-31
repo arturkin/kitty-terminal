@@ -1,0 +1,15 @@
+# Copy to <repo>/.workmux.yaml (or run `workmux init` and edit).
+# "<global>" inherits the matching entries from ~/.config/workmux/config.yaml.
+
+files:
+  copy: ['<global>']
+  symlink:
+    - .turbo          # build caches are safe to share across worktrees
+    - .next/cache
+
+panes:
+  - command: <agent>
+    focus: true
+  - split: horizontal
+  - split: vertical
+    command: pnpm dev

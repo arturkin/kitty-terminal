@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# Open the right JetBrains IDE on a git worktree, seeding it first.
+#   wt-ide            [path]   pick the IDE from the repo's own signals
+#   wt-ide --other    [path]   open the one auto-detect would not have picked
+#   wt-ide phpstorm   [path]   force a specific IDE
+set -euo pipefail
+# Launched from a terminal key binding, which gives a minimal env; make the
+# IDE launchers findable regardless.
+export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+
+WT_CONFIG_DIR="${WT_CONFIG_DIR:-$HOME/.config/wt}"
+HOOK_DIR="$WT_CONFIG_DIR/hooks"
+
+mode=auto; ide=""
+case "${1:-}" in
+  --auto)  shift ;;
+  --other) mode=other; shift ;;
+  -*|"")   ;;
+  *)       ide="$1"; mode=explicit; shift ;;
+esac
+start="${1:-$PWD}"
+[ -d "$start" ] || start="$(dirname "$start")"
+
+# shellcheck source=/dev/null
+[ -r "$WT_CONFIG_DIR/config.sh" ] && . "$WT_CONFIG_DIR/config.sh"
+
+if ! git -C "$start" rev-parse --git-dir >/dev/null 2>&1; then
+  echo "wt-ide: $start is not in a git repo; opening in ${ide:-webstorm}" >&2
+  exec "${ide:-webstorm}" "$start"
+fi
+
+wt="$(git -C "$start" rev-parse --show-toplevel)"
+main="$(git -C "$wt" worktree list --porcelain | sed -n '1s/^worktree //p')"
+
+# A repo may pin its IDE in <repo>/.wtrc with: WT_IDE=phpstorm
+# shellcheck source=/dev/null
+[ -r "$main/.wtrc" ] && . "$main/.wtrc"
+
+detect_ide() { # cheapest signals first; no deep scans on big monorepos
+  [ -n "${WT_IDE:-}" ] && { echo "$WT_IDE"; return; }
+  [ -f "$main/.idea/php.xml" ] && { echo phpstorm; return; }
+  [ -f "$main/composer.json" ] || [ -f "$main/artisan" ] && { echo phpstorm; return; }
+  find "$main" -maxdepth 2 -name '*.php' -print -quit 2>/dev/null | grep -q . \
+    && { echo phpstorm; return; }
+  echo webstorm
+}
+
+case "$mode" in
+  auto)  ide="$(detect_ide)" ;;
+  other) [ "$(detect_ide)" = phpstorm ] && ide=webstorm || ide=phpstorm ;;
+esac
+
+run_hook() {
+  local h="$HOOK_DIR/$1"
+  [ -x "$h" ] && WT_IDE="$ide" WT_PATH="$wt" WT_MAIN="$main" "$h" "$wt" "$main" "$ide"
+  return 0
+}
+
+echo "wt-ide: $ide -> $wt"
+run_hook pre-ide
+wt-link "$wt" || echo "wt-ide: seeding reported problems, opening anyway" >&2
+"$ide" "$wt"
+run_hook post-ide

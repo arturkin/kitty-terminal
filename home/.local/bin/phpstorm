@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# PhpStorm is a standalone (non-Toolbox) install; mirror the Toolbox launcher shape.
+exec open -na "/Applications/PhpStorm.app" --args "$@"

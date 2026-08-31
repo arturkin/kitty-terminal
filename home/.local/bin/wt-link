@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# Seed a git worktree from its main checkout: .idea settings + gitignored build
+# artifacts (node_modules, vendor, .env, ...). Idempotent — safe to re-run.
+# Usage: wt-link [worktree-path]     (defaults to $PWD)
+set -euo pipefail
+export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+
+start="${1:-$PWD}"
+[ -d "$start" ] || start="$(dirname "$start")"
+
+# --- defaults (override in ~/.config/wt/config.sh or <repo>/.wtrc) ----------
+# Basenames to pull in from the main checkout.
+WT_LINK_NAMES=${WT_LINK_NAMES:-"node_modules vendor .env .env.local .venv"}
+# Subset of the above to reflink-clone instead of symlink. Clones are isolated
+# but cost ~4s per 20k files, so big node_modules trees stay symlinked.
+WT_CLONE_NAMES=${WT_CLONE_NAMES:-".env .env.local"}
+# Per-window IDE state that must not be inherited.
+WT_IDEA_EXCLUDES=${WT_IDEA_EXCLUDES:-'workspace.xml shelf/ caches/ sonarlint* httpRequests/ $CACHE_FILE$ .gitignore'}
+
+WT_CONFIG_DIR="${WT_CONFIG_DIR:-$HOME/.config/wt}"
+# shellcheck source=/dev/null
+[ -r "$WT_CONFIG_DIR/config.sh" ] && . "$WT_CONFIG_DIR/config.sh"
+
+git -C "$start" rev-parse --git-dir >/dev/null 2>&1 || {
+  echo "wt-link: $start is not inside a git repository" >&2; exit 1; }
+
+wt="$(git -C "$start" rev-parse --show-toplevel)"
+main="$(git -C "$wt" worktree list --porcelain | sed -n '1s/^worktree //p')"
+
+# Per-repo overrides live in the main checkout so they apply even when
+# .wtrc is gitignored.
+# shellcheck source=/dev/null
+[ -r "$main/.wtrc" ] && . "$main/.wtrc"
+
+if [ "$wt" = "$main" ]; then
+  echo "wt-link: $wt is the main checkout, nothing to seed"
+  exit 0
+fi
+
+linked=0 skipped=0
+
+# --- 1. IDE settings -------------------------------------------------------
+if [ -d "$main/.idea" ] && [ ! -d "$wt/.idea" ]; then
+  ex=()
+  for e in $WT_IDEA_EXCLUDES; do ex+=(--exclude "$e"); done
+  rsync -a "${ex[@]}" "$main/.idea/" "$wt/.idea/"
+  echo "wt-link: .idea seeded from main checkout"
+fi
+
+# --- 2. gitignored artifacts ----------------------------------------------
+# git collapses ignored directories, so nested node_modules are not re-listed.
+name_re="$(printf '%s' "$WT_LINK_NAMES" | tr ' ' '\n' | sed 's/\./\\./g' | paste -sd'|' -)"
+
+while IFS= read -r rel; do
+  rel="${rel%/}"
+  [ -n "$rel" ] || continue
+  case "$rel" in .idea|.idea/*) continue ;; esac
+
+  src="$main/$rel"
+  dst="$wt/$rel"
+  [ -e "$src" ] || continue
+  if [ -e "$dst" ] || [ -L "$dst" ]; then skipped=$((skipped+1)); continue; fi
+
+  mkdir -p "$(dirname "$dst")"
+  base="$(basename "$rel")"
+
+  clone=0
+  for c in $WT_CLONE_NAMES; do [ "$base" = "$c" ] && clone=1 && break; done
+
+  if [ "$clone" = 1 ] && cp -Rc "$src" "$dst" 2>/dev/null; then
+    echo "  clone   $rel"
+  else
+    ln -s "$src" "$dst"
+    echo "  link    $rel"
+  fi
+  linked=$((linked+1))
+done < <(
+  git -C "$main" ls-files --others --ignored --exclude-standard \
+      --directory --no-empty-directory 2>/dev/null \
+    | grep -E "(^|/)($name_re)/?$" || true
+)
+
+echo "wt-link: $linked seeded, $skipped already present  ($wt)"

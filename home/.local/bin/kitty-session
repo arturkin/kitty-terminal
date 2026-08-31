@@ -1,0 +1,284 @@
+#!/usr/bin/env python3
+"""Save and restore kitty layouts: tabs, panes, working directories, agents.
+
+kitty has no session server - quitting it kills every process. This does not
+change that. What it does is snapshot the *shape* of your workspace (tabs,
+their layout, every pane's working directory, and which panes were running a
+Claude Code agent) and rebuild it afterwards, resuming each agent with
+`claude --continue`.
+
+    kitty-session save [NAME]      snapshot now (default name: latest)
+    kitty-session restore [NAME]   rebuild it (default: latest)
+    kitty-session list             what is on disk
+    kitty-session export [NAME]    print a kitty session.conf for cold start
+
+`latest` is written continuously by session_watcher.py, so after a quit it
+holds the shape of the workspace you quit out of.
+
+Save flags:    --guard (skip a snapshot that is losing panes to a teardown).
+Restore flags: --no-agents (shells only), --dry-run (print the plan).
+Snapshots live in ~/.local/state/kitty-sessions.
+"""
+from __future__ import annotations
+
+import glob
+import json
+import os
+import subprocess
+import sys
+import time
+from datetime import datetime
+from pathlib import Path
+
+STATE = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "kitty-sessions"
+AUTOSAVE_INTERVAL = 30
+AGENT_NAMES = {"claude"}
+AGENT_RESUME = "claude --continue"
+
+
+# --- talking to kitty ------------------------------------------------------
+
+def socket() -> str | None:
+    listen = os.environ.get("KITTY_LISTEN_ON")
+    if listen:
+        return listen
+    socks = sorted(glob.glob("/tmp/kitty-*"), key=os.path.getmtime, reverse=True)
+    return f"unix:{socks[0]}" if socks else None
+
+
+def rc(*args: str, check: bool = True) -> str:
+    cmd = ["kitten", "@"]
+    sock = socket()
+    if sock:
+        cmd += ["--to", sock]
+    cmd += list(args)
+    p = subprocess.run(cmd, capture_output=True, text=True)
+    if p.returncode != 0:
+        if check:
+            sys.exit(f"kitty-session: `{' '.join(args)}` failed: {p.stderr.strip()}")
+        return ""
+    return p.stdout
+
+
+# --- snapshotting ----------------------------------------------------------
+
+def pane_of(win: dict) -> dict:
+    """One pane's restorable state: where it was and what it was running."""
+    procs = win.get("foreground_processes") or []
+    agent = next(
+        (p for p in procs if p.get("cmdline") and os.path.basename(p["cmdline"][0]).lstrip("-") in AGENT_NAMES),
+        None,
+    )
+    cwd = (agent or (procs[0] if procs else {})).get("cwd") or win.get("cwd") or str(Path.home())
+    return {
+        "cwd": cwd,
+        "agent": agent is not None,
+        "active": win.get("is_active", False),
+        "title": win.get("title", ""),
+    }
+
+
+def snapshot() -> dict:
+    data = json.loads(rc("ls"))
+    os_windows = []
+    for osw in data:
+        tabs = []
+        for tab in osw["tabs"]:
+            panes = [pane_of(w) for w in tab["windows"]]
+            if not panes:
+                continue
+            tabs.append({
+                "title": tab.get("title", ""),
+                "layout": tab.get("layout", "grid"),
+                "active": tab.get("is_active", False),
+                "panes": panes,
+            })
+        if tabs:
+            os_windows.append({"tabs": tabs})
+    return {
+        "saved_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "kitty_pid": kitty_pid(),
+        "os_windows": os_windows,
+    }
+
+
+def kitty_pid() -> int | None:
+    """listen_on is unix:/tmp/kitty-{kitty_pid}, so the socket names the instance."""
+    sock = socket() or ""
+    tail = sock.rsplit("kitty-", 1)[-1]
+    return int(tail) if tail.isdigit() else None
+
+
+def alive(pid: int | None) -> bool:
+    if not pid:
+        return False
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
+def describe(snap: dict) -> str:
+    tabs = sum(len(w["tabs"]) for w in snap["os_windows"])
+    panes = sum(len(t["panes"]) for w in snap["os_windows"] for t in w["tabs"])
+    agents = sum(p["agent"] for w in snap["os_windows"] for t in w["tabs"] for p in t["panes"])
+    return f"{tabs} tab(s), {panes} pane(s), {agents} agent(s)"
+
+
+def pane_count(snap: dict) -> int:
+    return sum(len(t["panes"]) for w in snap["os_windows"] for t in w["tabs"])
+
+
+def write(name: str, snap: dict) -> Path:
+    STATE.mkdir(parents=True, exist_ok=True)
+    path = STATE / f"{name}.json"
+    path.write_text(json.dumps(snap, indent=1))
+    return path
+
+
+def read(name: str) -> dict:
+    path = STATE / f"{name}.json"
+    if not path.exists():
+        have = ", ".join(sorted(p.stem for p in STATE.glob("*.json"))) or "none"
+        die(f"no snapshot named '{name}' (have: {have})")
+    return json.loads(path.read_text())
+
+
+# --- restoring -------------------------------------------------------------
+
+def tab_id_of_window(win_id: int) -> int | None:
+    for osw in json.loads(rc("ls")):
+        for tab in osw["tabs"]:
+            if any(w["id"] == win_id for w in tab["windows"]):
+                return tab["id"]
+    return None
+
+
+def restore(snap: dict, agents: bool = True, dry_run: bool = False) -> None:
+    focus_tab: int | None = None
+    focus_win: int | None = None
+
+    for osw in snap["os_windows"]:
+        for tab in osw["tabs"]:
+            panes = tab["panes"]
+            title = tab["title"] or os.path.basename(panes[0]["cwd"])
+            if dry_run:
+                print(f"tab {title!r} [{tab['layout']}]")
+                for p in panes:
+                    print(f"  pane {p['cwd']}" + ("  + claude --continue" if p["agent"] and agents else ""))
+                continue
+
+            win_id = int(rc("launch", "--type=tab", "--tab-title", title,
+                            "--cwd", panes[0]["cwd"], "--keep-focus").strip())
+            ids = [win_id]
+            tab_id = tab_id_of_window(win_id)
+            for pane in panes[1:]:
+                # --match picks the tab, --next-to the pane inside it to split
+                ids.append(int(rc("launch", "--location=vsplit", "--keep-focus",
+                                  "--match", f"window_id:{win_id}",
+                                  "--next-to", f"id:{ids[-1]}",
+                                  "--cwd", pane["cwd"]).strip()))
+
+            if tab_id is not None:
+                rc("goto-layout", "--match", f"id:{tab_id}", tab["layout"], check=False)
+                rc("action", "--match", f"id:{tab_id}", "layout_action", "equalize", check=False)
+
+            for pane, wid in zip(panes, ids):
+                if pane["agent"] and agents:
+                    rc("send-text", "--match", f"id:{wid}", f"{AGENT_RESUME}\r", check=False)
+                if pane["active"]:
+                    focus_win = wid
+            if tab["active"]:
+                focus_tab = tab_id
+
+    if dry_run:
+        return
+    if focus_win is not None:
+        rc("focus-window", "--match", f"id:{focus_win}", check=False)
+    elif focus_tab is not None:
+        rc("focus-tab", "--match", f"id:{focus_tab}", check=False)
+
+
+def export(snap: dict) -> str:
+    """A kitty session.conf - for `kitty --session` or startup_session."""
+    out: list[str] = []
+    for osw in snap["os_windows"]:
+        for tab in osw["tabs"]:
+            panes = tab["panes"]
+            out.append(f"new_tab {tab['title'] or os.path.basename(panes[0]['cwd'])}")
+            out.append(f"layout {tab['layout']}")
+            for pane in panes:
+                out.append(f"cd {pane['cwd']}")
+                out.append(f"launch {AGENT_RESUME}" if pane["agent"] else "launch")
+            if tab["active"]:
+                out.append("focus")
+            out.append("")
+    return "\n".join(out)
+
+
+GUARD_SECONDS = 60
+
+
+def losing_panes(name: str, snap: dict) -> bool:
+    """True if this snapshot drops panes moments after a bigger one - a quit."""
+    path = STATE / f"{name}.json"
+    if not path.exists() or time.time() - path.stat().st_mtime > GUARD_SECONDS:
+        return False
+    try:
+        return pane_count(snap) < pane_count(json.loads(path.read_text()))
+    except (ValueError, KeyError):
+        return False
+
+
+def die(msg: str) -> None:
+    """Errors have to reach the user even when kitty ran us from a key binding."""
+    report(f"error: {msg}")
+    sys.exit(f"kitty-session: {msg}")
+
+
+def report(msg: str, detail: str = "") -> None:
+    """Print when a human is watching, notify when kitty ran us from a key."""
+    if sys.stdout.isatty():
+        print(f"{msg}{' -> ' + detail if detail else ''}")
+        return
+    notify = Path.home() / ".local/bin/kitty-notify"
+    if notify.exists():
+        subprocess.run([str(notify), "-i", "kitty-session", "kitty session", msg],
+                       capture_output=True)
+
+
+def main() -> None:
+    argv = sys.argv[1:]
+    flags = {a for a in argv if a.startswith("-")}
+    args = [a for a in argv if not a.startswith("-")]
+    action = args[0] if args else "save"
+    name = args[1] if len(args) > 1 else None
+
+    if action in ("save", "s"):
+        snap = snapshot()
+        name = name or "latest"
+        if "--guard" in flags and losing_panes(name, snap):
+            return  # a teardown in progress would otherwise erode the snapshot
+        path = write(name, snap)
+        report(f"saved {describe(snap)}", str(path))
+    elif action in ("restore", "r"):
+        snap = read(name or "latest")
+        if alive(snap.get("kitty_pid")) and snap.get("kitty_pid") == kitty_pid():
+            print("note: this snapshot is from the kitty instance you are in - "
+                  "restoring it adds a copy of the current workspace")
+        restore(snap, agents="--no-agents" not in flags, dry_run="--dry-run" in flags)
+        if "--dry-run" not in flags:
+            report(f"restored {describe(snap)} from {snap['saved_at']}")
+    elif action in ("list", "ls", "l"):
+        for path in sorted(STATE.glob("*.json")):
+            snap = json.loads(path.read_text())
+            print(f"  {path.stem:<12} {snap['saved_at']}  {describe(snap)}")
+    elif action in ("export", "e"):
+        print(export(read(name or "latest")), end="")
+    else:
+        sys.exit(__doc__)
+
+
+if __name__ == "__main__":
+    main()

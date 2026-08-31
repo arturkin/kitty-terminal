@@ -1,0 +1,29 @@
+# workmux global defaults. Per-project .workmux.yaml overrides these;
+# use "<global>" inside a list to inherit these entries.
+
+agent: claude
+merge_strategy: rebase
+worktree_naming: basename
+
+# Seeds .idea + every gitignored node_modules/vendor/.env from the main
+# checkout. Owns all file seeding, so there is no `files:` block here.
+post_create:
+  - "$HOME/.local/bin/wt-link"
+
+# No install step: node_modules is symlinked to the main checkout, so running
+# an installer inside a worktree would mutate the shared tree.
+
+# One agent per cell. `wt <name>` runs a worktree in the pane you are already
+# standing in, so the 2x2 launch grid holds four worktrees; a tab is what you
+# get when you call `workmux add` directly, and it should look like one cell.
+# For a grid inside a worktree tab instead, chain splits here --
+# `horizontal` puts a pane beside, `vertical` starts the row below:
+#   - command: <agent>
+#     focus: true
+#   - split: horizontal
+#   - split: vertical
+#   - split: horizontal
+panes:
+  - command: <agent>
+    focus: true
+nerdfont: true
