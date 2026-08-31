@@ -24,6 +24,18 @@
 # context, q quit. Untracked files are not shown - git diff does not see them.
 set -uo pipefail
 
+# kitty's `launch` (what cmd+shift+g uses) runs with the GUI app's PATH -- no
+# Homebrew, no ~/.local/bin, because it never sources a login shell. Resolve
+# the viewers here instead of depending on the caller's environment.
+for _d in /opt/homebrew/bin /usr/local/bin "$HOME/.local/bin"; do
+  case ":$PATH:" in
+    *":$_d:"*) ;;
+    *) [ -d "$_d" ] && PATH="$PATH:$_d" ;;
+  esac
+done
+unset _d
+export PATH
+
 pause() { [ -t 0 ] && { printf '\npress any key to close'; read -rsn1 </dev/tty 2>/dev/null; echo; }; }
 
 where=here
