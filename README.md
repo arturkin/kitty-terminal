@@ -54,6 +54,7 @@ for and nothing that can end up inconsistent — and it re-flows correctly when 
 | `⌃⇧Z` / `⌃⇧X` | jump to the previous / next **prompt** in this pane |
 | `⌘⇧R` | reload config |
 | `F1` or `⌥/` | **cheat sheet** — every shortcut and command, as an overlay |
+| `F2` | **what is running** — every pane's jobs; kill them or jump to one |
 
 `⌘K` on its own would clear the scrollback and leave the visible screen alone,
 so it looks like nothing happened. Terminal.app wipes both, so here it is
@@ -165,6 +166,80 @@ back. Terminal diff viewers have no draggable scrollbar (kitty has none
 anywhere); the file tree and `?`-listed jumps are what replace it.
 
 Untracked files are not shown — `git diff` does not see them.
+
+## What is running
+
+`F2`, or `kjobs` in a shell. Every command running in every pane of this kitty,
+what it is costing, and a way to kill it:
+
+```
+ Running (1)  ·  11% cpu  ·  2.3G              2 agents  ·  sort: tab
+
+  yarn dev · pane 1   ▾ yarn dev                  43m     ·   893M  ~/…/js/web
+                        └ nodemon.js              43m     ·    13M  ~/…/js/web
+                          └ node --max_old_spa…   43m   10%   865M  ~/…/js/web
+  main · pane 1       ▸ claude ✳ Ancient otter…    1d   10%   1.3G  ~/…/ab-car-widget
+  main · pane 2       ▸ claude ✳ Export and re…   23h  2.4%   190M  ~/Work/terminal
+```
+
+`j`/`k` move, `space` marks, `tab` opens a row's children, `s` cycles the sort,
+`x` sends **SIGTERM**, `X` sends **SIGKILL**, `↵` focuses the pane that row came
+from and closes the overlay, `r` refreshes (it also refreshes itself every 2s),
+`q` closes. A single row is signalled without a prompt — you opened a kill list
+on purpose — while killing several marked rows asks once and names them, because
+marks survive a cancel.
+
+Rows are the command you typed, not the process tree under it. A pane running
+Claude Code holds five processes — the agent, two MCP servers, a language
+server, a `caffeinate` — and this shows one row: `claude`. It gets there by
+walking down from the pane's child treating shells as transparent (kitty starts
+panes as `login … kitten run-shell --shell /bin/zsh`, so those are plumbing too)
+and stopping at the first real command. `node /Users/…/v24.11.0/bin/yarn dev` is
+displayed as what you actually ran, `yarn dev`.
+
+**CPU and memory cover the whole subtree**, because that is what a kill takes
+down: the `claude` row counts the agent plus its MCP servers and language
+server. CPU is measured as a delta between refreshes rather than `ps`'s
+lifetime average, so it reflects the last two seconds — the first frame drawn
+still shows the average, and `·` means under half a percent.
+
+**Agent rows carry their session name** from the pane title, so four panes
+running Claude Code are told apart by what they are working on rather than by
+their directory. They are dimmed, sorted last in the default order, and left
+out of both the header count and the tab bar's marker.
+
+`tab` opens a row to show what is under it, which is how you find out that the
+865M in a `yarn dev` row is one `node` child, or which MCP server an agent is
+leaking. **Killing one of those children signals only that process**: children
+share their job's process group, so signalling the group there would take the
+whole job down with it.
+
+Killing a job, by contrast, signals its **process group**, so `yarn dev` takes
+its children with it. If that group turns out to be the pane's own shell group,
+only the one process is signalled — a kill here can never take a pane's zsh down
+with it. `x` leaves the row saying `terminating…` until it dies or the list
+forgets; something that ignores SIGTERM sits there until you press `X`.
+
+`s` cycles the sort: tab order, then CPU, memory and age, shown in the header.
+The default groups by tab and keeps agents last; the other three sort purely by
+the number, agents included, since finding the heaviest thing is the point.
+
+The tab bar carries the short version as `▸N`: N panes in that tab running
+something. **Agents are deliberately not counted** — nearly every pane holds one
+all day, so counting them would pin the marker at `▸4` and say nothing, and the
+per-pane `✳ ◐` glyphs already cover them.
+
+`▸N` counts panes busy in the *foreground*. The F2 list is broader: it also
+finds what you backgrounded with `&`, which kitty itself cannot see (it reports
+only a pane's foreground process group, and a tab bar redraw cannot afford a
+`ps`). So a forgotten `sleep 300 &` shows up under F2 with no marker on its tab.
+
+Overlays — pagers, `kdiff`, the F2 list itself — are not panes and hold no jobs,
+so they never appear as rows. One kitty instance is one list: `listen_on` is per
+kitty PID, so a second kitty app has its own.
+
+`kjobs --json` prints the same rows, children included, for scripts and for
+checking the classifier without reading a curses screen.
 
 ## Images in a pane
 
@@ -331,7 +406,7 @@ So `~/Work/guide` opens PhpStorm, `~/Work/monorepo` opens WebStorm. `⌥I` flips
 ```
 ~/.config/kitty/kitty.conf          keys, colours, font, remote control
 ~/.config/kitty/session.conf        the startup 2x2
-~/.config/kitty/tab_bar.py          agent status in tab titles
+~/.config/kitty/tab_bar.py          agent status + busy panes in tab titles
 ~/.config/kitty/workmux_watcher.py  repaint + auto-clear on focus
 ~/.config/kitty/session_watcher.py  rolling session snapshots
 ~/.config/kitty/open-actions.conf   what CMD+click does with a link
@@ -341,6 +416,7 @@ So `~/Work/guide` opens PhpStorm, `~/Work/monorepo` opens WebStorm. `⌥I` flips
 ~/.local/bin/wt-ide                 IDE detection + launch
 ~/.local/bin/wt-help                the cheat sheet (--plain for pipes)
 ~/.local/bin/kdiff                  whole-change-set diff in kitten diff
+~/.local/bin/kjobs                  what is running in every pane (F2)
 ~/.local/bin/kitty-session          save / restore the workspace shape
 ~/.local/bin/kitty-notify           desktop notification tied to a pane
 ~/.config/wt/images.zsh             icat / ilast / iclear

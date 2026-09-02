@@ -33,6 +33,7 @@
 .local/bin/kitty-session
 .local/bin/kitty-notify
 .local/bin/kdiff
+.local/bin/kjobs
 .local/bin/wt-help
 .local/bin/wt-ide
 .local/bin/wt-link

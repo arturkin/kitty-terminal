@@ -58,6 +58,7 @@ key "CMD+ALT+S"    "snapshot the workspace (tabs, panes, dirs, agents)"
 key "CMD+ALT+R"    "rebuild the last snapshot, resuming agents"
 key "CMD+SHIFT+R"  "reload kitty config"
 key "F1 / ALT+/"   "this sheet"
+key "F2"           "what is running in every pane - kill it, or jump to it"
 cmd "kitty-session ls"        "snapshots on disk (latest is saved for you)"
 cmd "kitty-session restore"   "...same as CMD+ALT+R; --dry-run, --no-agents"
 

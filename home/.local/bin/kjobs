@@ -1,0 +1,658 @@
+#!/usr/bin/env python3
+"""What is running in every kitty pane, and a way to kill it.
+
+kitty is the registry: `kitty @ ls` reports every OS window, tab and pane
+along with the processes in each pane's foreground group. This walks down
+from each pane's child process, treats shells as transparent, and reports
+the topmost real command per branch -- so a Claude Code pane is one `claude`
+row, not five rows of MCP servers and language servers. CPU and memory for
+that row cover its whole subtree, which is what a kill takes down.
+
+    kjobs            the picker (bound to F2 in kitty.conf)
+    kjobs --json     the same rows as JSON, for scripts and verification
+
+Keys: j/k move, space mark, tab show a row's children, s cycle sort,
+x SIGTERM, X SIGKILL, enter focus that pane, r refresh, q quit. Killing a
+job signals its process group; killing one of its children signals only
+that process.
+"""
+from __future__ import annotations
+
+import json
+import os
+import signal
+import subprocess
+import sys
+import time
+from glob import glob
+
+# Walked through rather than reported: a pane's own shell plumbing. kitty
+# starts panes as `login -f -l -p USER kitten run-shell --shell /bin/zsh`,
+# so `login` and `kitten` are part of the plumbing too, not jobs.
+TRANSPARENT = {
+    'zsh', '-zsh', 'bash', '-bash', 'sh', '-sh', 'fish', '-fish', 'dash',
+    'login', '-login', 'kitten', 'kitty',
+}
+AGENTS = {'claude'}
+# `node /Users/x/.nvm/versions/node/v24.11.0/bin/yarn dev` is `yarn dev`.
+INTERPRETERS = {'node', 'python', 'python3', 'ruby', 'perl', 'bun', 'deno'}
+TERM_GRACE = 8.0  # how long a row keeps saying "terminating..."
+SORTS = ('tab', 'cpu', 'mem', 'age')
+
+# pid -> (subtree cpu seconds, wall clock) from the previous sample, which is
+# what turns cumulative CPU time into a percentage over the refresh interval.
+_cpu_prev: dict[int, tuple[float, float]] = {}
+
+
+def die(msg: str) -> None:
+    print(f'kjobs: {msg}', file=sys.stderr)
+    raise SystemExit(1)
+
+
+# --------------------------------------------------------------------------
+# Data
+# --------------------------------------------------------------------------
+def socket_address() -> str:
+    addr = os.environ.get('KITTY_LISTEN_ON')
+    if addr:
+        return addr
+    # Not launched from kitty: fall back to kitty.conf's listen_on pattern.
+    found = glob('/tmp/kitty-[0-9]*')
+    if not found:
+        die('no kitty socket: is allow_remote_control on and listen_on set?')
+    newest = max(found, key=lambda path: int(path.rsplit('-', 1)[1]))
+    return 'unix:' + newest
+
+
+def kitty_ls() -> list:
+    try:
+        out = subprocess.run(
+            ['kitty', '@', '--to', socket_address(), 'ls'],
+            capture_output=True, text=True, timeout=5, check=True,
+        ).stdout
+    except FileNotFoundError:
+        die('kitty is not on PATH')
+    except subprocess.TimeoutExpired:
+        die('kitty @ ls timed out')
+    except subprocess.CalledProcessError as e:
+        die(f'kitty @ ls failed: {e.stderr.strip()}')
+    return json.loads(out)
+
+
+def clock_seconds(value: str) -> float:
+    """[[dd-]hh:]mm:ss -- both ps etime and ps time -- as seconds."""
+    days = 0
+    rest = value.strip()
+    try:
+        if '-' in rest:
+            head, rest = rest.split('-', 1)
+            days = int(head)
+        bits = [float(b) for b in rest.split(':')] if rest else [0.0]
+    except ValueError:
+        return 0.0
+    total = 0.0
+    for bit in bits:
+        total = total * 60 + bit
+    return total + days * 86400
+
+
+def process_table() -> dict[int, dict]:
+    """The process table in one call, keyed by pid."""
+    out = subprocess.run(
+        ['ps', '-axo', 'pid=,ppid=,pgid=,state=,etime=,time=,%cpu=,rss=,args='],
+        capture_output=True, text=True, check=True,
+    ).stdout
+    table: dict[int, dict] = {}
+    for line in out.splitlines():
+        parts = line.split(None, 8)
+        if len(parts) < 9:
+            continue
+        pid, ppid, pgid, state, etime, cputime, pcpu, rss, args = parts
+        if state.startswith('Z'):
+            continue  # a zombie is not something to list or signal
+        try:
+            table[int(pid)] = {
+                'pid': int(pid), 'ppid': int(ppid), 'pgid': int(pgid),
+                'etime': etime, 'cpu_seconds': clock_seconds(cputime),
+                'pcpu': float(pcpu), 'rss_kb': int(rss), 'args': args,
+            }
+        except ValueError:
+            continue
+    return table
+
+
+def children_of(table: dict[int, dict]) -> dict[int, list[int]]:
+    kids: dict[int, list[int]] = {}
+    for proc in table.values():
+        kids.setdefault(proc['ppid'], []).append(proc['pid'])
+    return kids
+
+
+def basename_of(args: str) -> str:
+    first = args.split(None, 1)[0] if args else ''
+    # ps prints `(zsh)` when it cannot read a process's argv -- a shell still
+    # exec'ing, most often. It is the same shell, so match it as one.
+    return os.path.basename(first).strip('()')
+
+
+def pretty_cmd(args: str) -> str:
+    """The command as you would have typed it: no interpreter, no full paths."""
+    tokens = args.split()
+    if not tokens:
+        return args
+    if (os.path.basename(tokens[0]) in INTERPRETERS and len(tokens) > 1
+            and tokens[1].startswith('/')):
+        tokens = tokens[1:]
+    return ' '.join(os.path.basename(t) if t.startswith('/') else t
+                    for t in tokens)
+
+
+def ancestors(pid: int, table: dict[int, dict]) -> set[int]:
+    seen: set[int] = set()
+    while pid in table and pid not in seen:
+        seen.add(pid)
+        pid = table[pid]['ppid']
+    return seen
+
+
+def topmost_jobs(pid: int, table, kids, depth: int = 0) -> list[dict]:
+    """Descend from pid through shells; report the first real command found."""
+    if depth > 12:
+        return []
+    proc = table.get(pid)
+    if proc is None:
+        return []
+    if basename_of(proc['args']) not in TRANSPARENT:
+        return [proc]
+    jobs: list[dict] = []
+    for kid in kids.get(pid, ()):
+        jobs.extend(topmost_jobs(kid, table, kids, depth + 1))
+    return jobs
+
+
+def subtree(pid: int, table, kids, depth: int = 1) -> list[tuple[int, dict]]:
+    """(depth, proc) for every descendant of pid, in tree order."""
+    out: list[tuple[int, dict]] = []
+    if depth > 12:
+        return out
+    for kid in kids.get(pid, ()):
+        proc = table.get(kid)
+        if proc is None:
+            continue
+        out.append((depth, proc))
+        out.extend(subtree(kid, table, kids, depth + 1))
+    return out
+
+
+def tab_name(tab: dict, panes: list[dict]) -> str:
+    """The tab's name as the tab bar shows it when no overlay is covering it.
+
+    An unnamed tab takes its title from the active window, and this picker is
+    itself an overlay -- so reading tab['title'] would label the tab you pressed
+    F2 in "Running".
+    """
+    if tab.get('title_overridden') or not panes:
+        return tab['title']
+    by_id = {w['id']: w for w in panes}
+    for window_id in tab.get('active_window_history', ()):
+        if window_id in by_id:
+            return by_id[window_id]['title'] or tab['title']
+    return panes[0]['title'] or tab['title']
+
+
+def session_label(title: str) -> str:
+    """A pane title worth appending to `claude`, or '' for a path-ish one."""
+    title = (title or '').strip()
+    if not title or title[0] in '~…/' or title.startswith('.'):
+        return ''
+    return title
+
+
+def cpu_percent(pid: int, cpu_seconds: float, now: float, pcpu: float) -> float:
+    """CPU over the last refresh interval; ps's lifetime average until then."""
+    previous = _cpu_prev.get(pid)
+    _cpu_prev[pid] = (cpu_seconds, now)
+    if previous is None:
+        return pcpu
+    prev_cpu, prev_at = previous
+    elapsed = now - prev_at
+    if elapsed < 0.5 or cpu_seconds < prev_cpu:
+        return pcpu
+    return max(0.0, (cpu_seconds - prev_cpu) / elapsed * 100)
+
+
+def collect() -> list[dict]:
+    """One row per running command, across every pane of this kitty."""
+    table = process_table()
+    kids = children_of(table)
+    mine = ancestors(os.getpid(), table)
+    os_windows = kitty_ls()
+    multi = len(os_windows) > 1
+    now = time.monotonic()
+    rows: list[dict] = []
+    for wi, osw in enumerate(os_windows, 1):
+        for tab in osw['tabs']:
+            # A group is one pane plus the overlays stacked on it, base first;
+            # overlays (pagers, kdiff, this picker) hold no jobs of their own.
+            overlays = {wid for group in tab.get('groups', ())
+                        for wid in group['windows'][1:]}
+            panes = [w for w in tab['windows'] if w['id'] not in overlays]
+            tab_label = tab_name(tab, panes)
+            for pi, win in enumerate(panes, 1):
+                # kitty knows each foreground process's own cwd; ps does not.
+                fg_cwd = {p['pid']: p['cwd']
+                          for p in win.get('foreground_processes', ())
+                          if p.get('cwd')}
+                for proc in topmost_jobs(win['pid'], table, kids):
+                    if proc['pid'] in mine:
+                        continue  # never list kjobs or the pane it runs in
+                    label = pretty_cmd(proc['args'])
+                    name = basename_of(label)
+                    agent = name in AGENTS
+                    if agent:
+                        session = session_label(win['title'])
+                        if session:
+                            label = f'{name} {session}'
+                    where = f'{tab_label} · pane {pi}'
+                    if multi:
+                        where = f'win{wi} · ' + where
+
+                    descendants = subtree(proc['pid'], table, kids)
+                    cpu_seconds = proc['cpu_seconds'] + sum(
+                        p['cpu_seconds'] for _, p in descendants)
+                    rss_kb = proc['rss_kb'] + sum(
+                        p['rss_kb'] for _, p in descendants)
+                    pcpu = proc['pcpu'] + sum(p['pcpu'] for _, p in descendants)
+                    rows.append({
+                        'pid': proc['pid'],
+                        'pgid': proc['pgid'],
+                        'shell_pgid': table.get(win['pid'], {}).get('pgid'),
+                        'cmd': label,
+                        'args': proc['args'],
+                        'name': name,
+                        'elapsed': proc['etime'],
+                        'age': clock_seconds(proc['etime']),
+                        'cpu': cpu_percent(proc['pid'], cpu_seconds, now, pcpu),
+                        'mem_kb': rss_kb,
+                        'agent': agent,
+                        'cwd': fg_cwd.get(proc['pid'], win['cwd']),
+                        'where': where,
+                        'window_id': win['id'],
+                        'tab_title': tab_label,
+                        'pane': pi,
+                        'at_prompt': win['at_prompt'],
+                        'kill_group': True,
+                        'depth': 0,
+                        'children': [{
+                            'pid': child['pid'],
+                            'pgid': child['pgid'],
+                            'shell_pgid': None,
+                            'cmd': pretty_cmd(child['args']),
+                            'args': child['args'],
+                            'name': basename_of(child['args']),
+                            'elapsed': child['etime'],
+                            'age': clock_seconds(child['etime']),
+                            'cpu': cpu_percent(child['pid'],
+                                               child['cpu_seconds'], now,
+                                               child['pcpu']),
+                            'mem_kb': child['rss_kb'],
+                            'agent': False,
+                            'cwd': fg_cwd.get(child['pid'], ''),
+                            'where': '',
+                            'window_id': win['id'],
+                            # A child shares its parent's process group, so
+                            # signalling the group here would kill the job too.
+                            'kill_group': False,
+                            'depth': depth,
+                            'children': [],
+                        } for depth, child in descendants],
+                    })
+    stale = set(_cpu_prev) - {r['pid'] for r in rows} - {
+        c['pid'] for r in rows for c in r['children']}
+    for pid in stale:
+        del _cpu_prev[pid]
+    return sort_rows(rows, 'tab')
+
+
+def sort_rows(rows: list[dict], mode: str) -> list[dict]:
+    if mode == 'cpu':
+        return sorted(rows, key=lambda r: (-r['cpu'], r['where'], r['pid']))
+    if mode == 'mem':
+        return sorted(rows, key=lambda r: (-r['mem_kb'], r['where'], r['pid']))
+    if mode == 'age':
+        return sorted(rows, key=lambda r: (-r['age'], r['where'], r['pid']))
+    return sorted(rows, key=lambda r: (r['agent'], r['where'], r['pid']))
+
+
+def kill_row(row: dict, sig: int) -> str | None:
+    """Signal the row's process group, or the pid alone when that isn't safe."""
+    pgid, pid = row['pgid'], row['pid']
+    group = row.get('kill_group') and pgid and pgid != row.get('shell_pgid')
+    try:
+        os.kill(-pgid if group else pid, sig)
+    except ProcessLookupError:
+        return None  # already gone; the next refresh drops the row
+    except PermissionError:
+        return f'not permitted to signal {pid}'
+    except OSError as e:
+        return f'{pid}: {e}'
+    return None
+
+
+# --------------------------------------------------------------------------
+# Display helpers
+# --------------------------------------------------------------------------
+def short_cwd(path: str, width: int = 0) -> str:
+    """~-relative, and elided in the middle only when it will not fit."""
+    if not path:
+        return ''
+    home = os.path.expanduser('~')
+    if path == home:
+        return '~'
+    if path.startswith(home + '/'):
+        path = '~/' + path[len(home) + 1:]
+    if width and len(path) <= width:
+        return path
+    parts = path.split('/')
+    if len(parts) > 3:
+        parts = [parts[0], '…'] + parts[-2:]
+    return '/'.join(parts)
+
+
+def short_elapsed(etime: str) -> str:
+    """ps etime as 3s / 21m / 3h / 2d."""
+    total = clock_seconds(etime)
+    if total >= 86400:
+        return f'{int(total // 86400)}d'
+    if total >= 3600:
+        hours = int(total // 3600)
+        minutes = int(total % 3600 // 60)
+        return f'{hours}h{minutes:02d}' if hours < 10 else f'{hours}h'
+    if total >= 60:
+        return f'{int(total // 60)}m'
+    return f'{int(total)}s'
+
+
+def short_mem(kb: int) -> str:
+    if kb >= 1024 * 1024:
+        return f'{kb / 1024 / 1024:.1f}G'
+    if kb >= 1024:
+        return f'{int(kb / 1024)}M'
+    return f'{kb}K' if kb else ''
+
+
+def short_cpu(percent: float) -> str:
+    if percent >= 10:
+        return f'{percent:.0f}%'
+    if percent >= 0.5:
+        return f'{percent:.1f}%'
+    return '·'
+
+
+def truncate(text: str, width: int) -> str:
+    if width <= 0:
+        return ''
+    return text if len(text) <= width else text[:max(0, width - 1)] + '…'
+
+
+# --------------------------------------------------------------------------
+# TUI
+# --------------------------------------------------------------------------
+HELP = ('[j/k] move  [space] mark  [tab] children  [s] sort  [x] TERM  '
+        '[X] KILL  [↵] focus pane  [r] refresh  [q] close')
+
+
+class Picker:
+    def __init__(self, screen):
+        self.screen = screen
+        self.jobs: list[dict] = []
+        self.visible: list[dict] = []
+        self.cursor = 0
+        self.marked: set[int] = set()
+        self.expanded: set[int] = set()
+        self.dying: dict[int, float] = {}
+        self.sort = 'tab'
+        self.message = ''
+        self.last_load = 0.0
+        self.load()
+
+    # -- state -----------------------------------------------------------
+    def load(self) -> None:
+        keep = self.visible[self.cursor]['pid'] if self.visible else None
+        self.jobs = sort_rows(collect(), self.sort)
+        self.flatten()
+        alive = {row['pid'] for row in self.visible}
+        self.marked &= alive
+        self.dying = {pid: at for pid, at in self.dying.items()
+                      if pid in alive and time.monotonic() - at < TERM_GRACE}
+        if keep is not None:
+            for i, row in enumerate(self.visible):
+                if row['pid'] == keep:
+                    self.cursor = i
+                    break
+        self.cursor = max(0, min(self.cursor, len(self.visible) - 1))
+        self.last_load = time.monotonic()
+
+    def flatten(self) -> None:
+        """Jobs, each followed by its children when it is expanded."""
+        self.visible = []
+        for job in self.jobs:
+            self.visible.append(job)
+            if job['pid'] in self.expanded:
+                self.visible.extend(job['children'])
+
+    def row(self) -> dict | None:
+        return self.visible[self.cursor] if self.visible else None
+
+    # -- drawing ---------------------------------------------------------
+    def put(self, y: int, x: int, text: str, attr: int = 0) -> None:
+        """addnstr that tolerates an overlay too small for what it draws."""
+        import curses
+        _, width = self.screen.getmaxyx()
+        try:
+            self.screen.addnstr(y, x, text, max(0, width - x - 1), attr)
+        except curses.error:
+            pass
+
+    def draw(self) -> None:
+        import curses
+        scr = self.screen
+        scr.erase()
+        height, width = scr.getmaxyx()
+
+        live = sum(1 for job in self.jobs if not job['agent'])
+        agents = len(self.jobs) - live
+        cpu = sum(job['cpu'] for job in self.jobs)
+        mem = sum(job['mem_kb'] for job in self.jobs)
+        left = f' Running ({live})  ·  {short_cpu(cpu)} cpu  ·  {short_mem(mem)}'
+        right = f'sort: {self.sort} '
+        if agents:
+            right = f'{agents} agent{"s" if agents > 1 else ""}  ·  ' + right
+        pad = max(1, width - 1 - len(left) - len(right))
+        self.put(0, 0, left + ' ' * pad + right,
+                 curses.color_pair(1) | curses.A_BOLD)
+
+        body_top, body_bottom = 2, height - 3
+        rows_fit = max(1, body_bottom - body_top + 1)
+        first = max(0, min(self.cursor - rows_fit // 2,
+                           max(0, len(self.visible) - rows_fit)))
+        if not self.visible:
+            self.put(body_top + 1, 2, 'Nothing running.', curses.A_DIM)
+        for offset, row in enumerate(self.visible[first:first + rows_fit]):
+            self.draw_row(offset + body_top, first + offset, row, width)
+
+        if self.message:
+            self.put(height - 2, 1, truncate(self.message, width - 2),
+                     curses.color_pair(3) | curses.A_BOLD)
+        self.put(height - 1, 1, truncate(HELP, width - 2), curses.A_DIM)
+        scr.refresh()
+
+    def columns(self, width: int) -> tuple[int, int, int]:
+        # Fixed: mark, four gaps, elapsed, cpu, mem, and the gap before cwd.
+        avail = max(24, width - 1 - (1 + 1 + 1 + 5 + 1 + 5 + 1 + 6 + 2))
+        where_w = min(22, max(10, avail // 4))
+        cmd_w = min(52, max(12, avail - where_w - 12))
+        cwd_w = max(0, avail - where_w - cmd_w)
+        return where_w, cmd_w, cwd_w
+
+    def draw_row(self, y: int, index: int, row: dict, width: int) -> None:
+        import curses
+        selected = index == self.cursor
+        dying = row['pid'] in self.dying
+        child = row['depth'] > 0
+        attr = curses.A_REVERSE if selected else curses.A_NORMAL
+        if row['agent'] or dying or child:
+            attr |= curses.A_DIM
+
+        where_w, cmd_w, cwd_w = self.columns(width)
+        if row['children']:
+            glyph = '▾ ' if row['pid'] in self.expanded else '▸ '
+        else:
+            glyph = '  '
+        cmd = 'terminating…' if dying else row['cmd']
+        if child:
+            cmd = '  ' * (row['depth'] - 1) + '└ ' + cmd
+            glyph = '  '
+        line = (f"{'•' if row['pid'] in self.marked else ' '} "
+                f"{truncate(row['where'], where_w).ljust(where_w)} "
+                f"{truncate(glyph + cmd, cmd_w).ljust(cmd_w)} "
+                f"{short_elapsed(row['elapsed']).rjust(5)} "
+                f"{short_cpu(row['cpu']).rjust(5)} "
+                f"{short_mem(row['mem_kb']).rjust(6)}  "
+                f"{truncate(short_cwd(row['cwd'], cwd_w), cwd_w)}")
+        self.put(y, 0, line.ljust(max(0, width - 1)), attr)
+
+    # -- actions ---------------------------------------------------------
+    def targets(self) -> list[dict]:
+        if self.marked:
+            return [row for row in self.visible if row['pid'] in self.marked]
+        row = self.row()
+        return [row] if row else []
+
+    def confirm(self, prompt: str) -> bool:
+        import curses
+        height, width = self.screen.getmaxyx()
+        self.put(height - 2, 1, truncate(prompt + '  y/n', width - 2),
+                 curses.color_pair(3) | curses.A_BOLD)
+        self.screen.refresh()
+        while True:
+            key = self.screen.getch()
+            if key in (ord('y'), ord('Y')):
+                return True
+            if key != -1:
+                return False
+
+    def kill(self, sig: int) -> None:
+        rows = self.targets()
+        if not rows:
+            return
+        name = 'SIGKILL' if sig == signal.SIGKILL else 'SIGTERM'
+        if len(rows) > 1:
+            # Marks survive a cancel, so name what is about to be signalled.
+            listed = ', '.join(r['name'] for r in rows[:4])
+            if len(rows) > 4:
+                listed += f' +{len(rows) - 4} more'
+            if not self.confirm(f'{name} {len(rows)} marked: {listed}?'):
+                self.message = 'cancelled'
+                return
+        errors = [err for err in (kill_row(r, sig) for r in rows) if err]
+        for row in rows:
+            self.dying[row['pid']] = time.monotonic()
+        self.marked.clear()
+        self.message = ('; '.join(errors) if errors else
+                        f'{name} → ' + ', '.join(r['name'] for r in rows))
+        self.load()
+
+    def toggle_children(self) -> None:
+        row = self.row()
+        if row is None or row['depth'] or not row['children']:
+            return
+        self.expanded ^= {row['pid']}
+        self.flatten()
+        self.cursor = self.visible.index(row)
+
+    def cycle_sort(self) -> None:
+        self.sort = SORTS[(SORTS.index(self.sort) + 1) % len(SORTS)]
+        self.jobs = sort_rows(self.jobs, self.sort)
+        self.flatten()
+        self.cursor = 0
+
+    def focus(self) -> bool:
+        row = self.row()
+        if row is None:
+            return False
+        subprocess.run(['kitty', '@', '--to', socket_address(), 'focus-window',
+                        '--match', f"id:{row['window_id']}"],
+                       capture_output=True, text=True)
+        return True
+
+    def run(self) -> None:
+        import curses
+        curses.curs_set(0)
+        self.screen.timeout(500)
+        while True:
+            self.draw()
+            key = self.screen.getch()
+            last = max(0, len(self.visible) - 1)
+            if key in (ord('q'), ord('Q'), 27):
+                return
+            if key in (ord('j'), curses.KEY_DOWN):
+                self.cursor = min(self.cursor + 1, last)
+            elif key in (ord('k'), curses.KEY_UP):
+                self.cursor = max(self.cursor - 1, 0)
+            elif key in (ord('g'), curses.KEY_HOME):
+                self.cursor = 0
+            elif key in (ord('G'), curses.KEY_END):
+                self.cursor = last
+            elif key == ord(' ') and self.visible:
+                self.marked ^= {self.visible[self.cursor]['pid']}
+                self.cursor = min(self.cursor + 1, last)
+            elif key == ord('\t'):
+                self.toggle_children()
+            elif key in (ord('s'), ord('S')):
+                self.cycle_sort()
+            elif key == ord('x'):
+                self.kill(signal.SIGTERM)
+            elif key == ord('X'):
+                self.kill(signal.SIGKILL)
+            elif key in (ord('r'), ord('R')):
+                self.message = ''
+                self.load()
+            elif key in (curses.KEY_ENTER, 10, 13):
+                if self.focus():
+                    return
+            if time.monotonic() - self.last_load > 2.0:
+                self.load()
+
+
+def main(argv: list[str]) -> int:
+    if '-h' in argv or '--help' in argv:
+        print(__doc__.strip())
+        return 0
+    if '--json' in argv:
+        json.dump(collect(), sys.stdout, indent=1)
+        print()
+        return 0
+    if argv:
+        die(f'unknown argument: {argv[0]}')
+    if not sys.stdout.isatty():
+        die('not a terminal; use --json')
+    import curses
+    curses.wrapper(_start)
+    return 0
+
+
+def _start(screen) -> None:
+    import curses
+    curses.use_default_colors()
+    try:
+        curses.init_pair(1, 111, -1)  # heading blue, as in wt-help
+        curses.init_pair(3, 214, -1)  # message amber
+    except curses.error:
+        curses.init_pair(1, curses.COLOR_BLUE, -1)
+        curses.init_pair(3, curses.COLOR_YELLOW, -1)
+    Picker(screen).run()
+
+
+if __name__ == '__main__':
+    raise SystemExit(main(sys.argv[1:]))
