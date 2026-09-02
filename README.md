@@ -291,7 +291,17 @@ given an expiry on the way out by `~/.config/kitty/notifications.py`, which
 kitty consults before it dispatches one: kitty's own command-finish banners and
 an OSC 99 from any program in any pane are both capped at 10s, whatever they
 asked for. **Editing that file needs kitty restarted** — a config reload will
-not pick it up — so `⌘⌥S`, quit, reopen, `⌘⌥R`. See development.md 13.1.
+not pick it up. Cold-start straight into your own workspace instead of the
+startup 2×2:
+
+```bash
+kitty-session export > ~/.config/kitty/restored.conf   # just before quitting
+⌘Q
+kitty --session ~/.config/kitty/restored.conf
+```
+
+`⌘⌥S`, quit, reopen, `⌘⌥R` gets there too, but restore is additive — see
+Session snapshots. development.md 13.1 has the mechanism.
 
 `kitty-notify "title" "body"` sends one by hand from any script; `-u critical`
 brings back the sticky style. `-e never` is overridden by the hook above while
@@ -320,6 +330,24 @@ and which panes had an agent running. Restore rebuilds the tabs and panes,
 so if `--continue` finds nothing, you are left at a prompt in the right
 directory rather than an empty pane. Snapshots live in
 `~/.local/state/kitty-sessions`.
+
+**Restore adds, it does not replace.** A launch always builds `session.conf`'s
+2×2 first — `startup_session` is a static file and knows nothing about snapshots
+— and restore replays over remote control, which needs kitty already running.
+So `⌘⌥R` leaves those four idle shells beside the tabs it rebuilt, for you to
+close. `export` skips the detour by turning a snapshot into a session file kitty
+can start *from*:
+
+```bash
+kitty-session export > ~/.config/kitty/restored.conf
+kitty --session ~/.config/kitty/restored.conf
+```
+
+Agent panes come out as `launch claude --continue`. A Dock or Spotlight launch
+ignores `--session` and uses `startup_session`, so this is a terminal-invoked
+start. Either route, two panes saved in the same directory both continue the
+most recent conversation there; the other one is still on disk under `claude
+--resume`.
 
 Not a detach: nothing keeps running, `--continue` resumes a conversation rather
 than a process tree, and a snapshot can be up to 20 seconds stale.
