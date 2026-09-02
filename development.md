@@ -550,8 +550,10 @@ that makes a window -- `kdiff`, `wt`, `workmux add`, the `F2` picker's own
 overlay -- pulls the app forward, which reads exactly like random focus theft
 when four agents work in parallel. Notifications are innocent, which is worth
 knowing before anyone reaches for `filter_notification` or a
-`notifications.py` hook: both were tried here and reverted, because stripping
-`Action.focus` costs click-to-focus on a banner and fixes nothing.
+`notifications.py` hook *for this*: both were tried against focus theft and
+reverted, because stripping `Action.focus` costs click-to-focus on a banner and
+fixes nothing. §13.1 uses `notifications.py` for something it is actually good
+at.
 
 Two useful instruments, if this comes up again: log transitions into kitty with
 `lsappinfo front` plus `HIDIdleTime` (idle near zero means you did it; a large
@@ -604,9 +606,47 @@ you · <worktree>` and `Claude finished · <worktree>`, the built-in ones read
 `Notification` hook is awaited *before* the channel is consulted, so the hook
 fires either way.
 
-One trap if you do reach for a `notifications.py` hook: kitty will not pick up
-a newly created one on `load_config_file`. A probe hook that logged every
-notification it saw was never called, and restarting kitty kills every agent.
+### 13.1 One expiry for every sender
+
+Per-sender expiry only covers the senders you know about. `kitty-notify` sets
+`--expire-after 10s` on its own banners, and Claude Code's channel is off, but
+neither covers kitty's `notify_on_cmd_finish` (whose only clear events are
+`focus` and `next` -- no timer) nor an OSC 99 from any program that happens to
+run in a pane.
+
+`~/.config/kitty/notifications.py` is the one place that sees all of them.
+Read out of the binary rather than guessed, since kitty's Python is frozen
+(`kitty +runpy` plus `co_names`/`co_consts` on the frozen code objects):
+
+- `NotificationManager.__init__` does `runpy.run_path(config_dir +
+  'notifications.py')['main']` and keeps it as `filter_script`.
+- `notify_with_command` calls `finalise`, `is_notification_allowed`,
+  `is_notification_filtered` -- which calls `filter_script(nc)` -- and only
+  then `desktop_integration.notify`. So the hook runs **before** dispatch.
+- `NotificationCommand.timeout` is a plain mutable int, the protocol's `w` key
+  in milliseconds: `-2` unset, `-1` the OS policy, `0` never, `>0` enforced by
+  kitty closing the notification itself. Closing is what clears it out of
+  Notification Center rather than merely off the screen.
+
+So `main` clamps `timeout` to 10s and always returns `False`, never filtering.
+Both sender classes were then measured in a throwaway headless instance
+(`--start-as=hidden`, its own `KITTY_CONFIG_DIRECTORY`, so the running kitty
+was never touched), with the hook instrumented to record what it saw:
+
+| Sender | Asked for | Got |
+|---|---|---|
+| a program's OSC 99, `w=0` | never expire | 10000 ms |
+| kitty's own `notify_on_cmd_finish` | `-1`, OS policy | 10000 ms |
+
+The trap is the load point: `filter_script` is read in
+`NotificationManager.__init__`, so a new or edited hook needs kitty
+**restarted** -- `load_config_file` will not pick it up, which is why an
+earlier probe hook appeared never to be called. Restarting kills every agent,
+so pay for it with §12.4: `⌘⌥S`, quit, reopen, `⌘⌥R`.
+
+One consequence worth knowing: while the hook is installed it also overrides a
+deliberate `-e never`, because `0` is exactly what "never" sends. Exempt by
+`application_name` or `notification_types` in `main` if you ever want one back.
 
 ---
 

@@ -286,8 +286,16 @@ and a banner parked over your work is a banner you end up clicking. See
 development.md 13 for the audit -- 190 banners in a day, none of which took
 focus on its own.
 
-`kitty-notify "title" "body"` sends one by hand from any script; `-e never`
-keeps one until you dismiss it, `-u critical` brings back the sticky style.
+That holds for every sender, not just this setup's own. A notification is
+given an expiry on the way out by `~/.config/kitty/notifications.py`, which
+kitty consults before it dispatches one: kitty's own command-finish banners and
+an OSC 99 from any program in any pane are both capped at 10s, whatever they
+asked for. **Editing that file needs kitty restarted** — a config reload will
+not pick it up — so `⌘⌥S`, quit, reopen, `⌘⌥R`. See development.md 13.1.
+
+`kitty-notify "title" "body"` sends one by hand from any script; `-u critical`
+brings back the sticky style. `-e never` is overridden by the hook above while
+it is installed.
 
 ## Session snapshots
 
