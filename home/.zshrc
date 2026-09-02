@@ -5,17 +5,17 @@ export NVM_DIR="$HOME/.nvm"
 
 
 # bun completions
-[ -s "/Users/arturkin/.bun/_bun" ] && source "/Users/arturkin/.bun/_bun"
+[ -s "$HOME/.bun/_bun" ] && source "$HOME/.bun/_bun"
 
 # bun
 export BUN_INSTALL="$HOME/.bun"
-export PATH="$BUN_INSTALL/bin:$PATH:/Users/arturkin/bin"
+export PATH="$BUN_INSTALL/bin:$PATH:$HOME/bin"
 eval "$(/opt/homebrew/bin/brew shellenv)"
 # The next line updates PATH for the Google Cloud SDK.
-if [ -f '/Users/arturkin/Downloads/google-cloud-sdk/path.zsh.inc' ]; then . '/Users/arturkin/Downloads/google-cloud-sdk/path.zsh.inc'; fi
+if [ -f "$HOME/Downloads/google-cloud-sdk/path.zsh.inc" ]; then . "$HOME/Downloads/google-cloud-sdk/path.zsh.inc"; fi
 
 # The next line enables shell command completion for gcloud.
-if [ -f '/Users/arturkin/Downloads/google-cloud-sdk/completion.zsh.inc' ]; then . '/Users/arturkin/Downloads/google-cloud-sdk/completion.zsh.inc'; fi
+if [ -f "$HOME/Downloads/google-cloud-sdk/completion.zsh.inc" ]; then . "$HOME/Downloads/google-cloud-sdk/completion.zsh.inc"; fi
 
 # go
 export GOPATH=$HOME/go

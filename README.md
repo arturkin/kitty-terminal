@@ -475,8 +475,10 @@ defeat its purpose and `install` would delete another machine's overrides.
 diff` to see what you changed, commit, push. Export is not automatic — until you
 run it, the repo is stale. `./sync status` tells you whether it is.
 
-**On a new machine.** Install kitty, workmux, Claude Code and `diffnav`
-(`brew install diffnav`, optional — `kdiff` falls back without it), then:
+**On a new machine.** Install kitty, workmux, Claude Code, `gh` (`brew install
+gh` — the credential step below needs it, and so does the `open-pr` skill) and
+`diffnav` (`brew install diffnav`, optional — `kdiff` falls back without it),
+then:
 
 ```
 git clone https://github.com/arturkin/kitty-terminal.git ~/Work/terminal
@@ -497,9 +499,16 @@ when it finishes:
   project history). `install` prints ready-to-paste `claude mcp add-json` lines.
 
 `export` refuses to finish if it finds a GitHub/AWS/Slack/Anthropic token or a
-private key anywhere under `home/`. Paths are absolute and user-specific
-(`/Users/arturkin/...` appears in `.zshrc` and `settings.json`), so a restore
-under a different username needs a pass over those two files.
+private key anywhere under `home/`.
+
+One file still hardcodes this machine's username: `settings.json`, in 29 places
+— 22 `Read(...)` deny rules, six one-off `Bash(...)` allow entries left over
+from past sessions, and one `autoMode` note. A restore under a different
+username needs a pass over that file. The deny rules are the part that matters,
+and `deny-sensitive-files.sh` already covers every path they name without
+depending on a username — it normalises `~` and `$HOME` itself and matches on
+the path text — so that protection survives a restore even before you edit
+them. `.zshrc` is username-independent.
 
 ## Required kitty settings
 

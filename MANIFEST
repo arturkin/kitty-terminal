@@ -1,7 +1,10 @@
 # Paths tracked by ./sync, relative to $HOME.
 # A trailing slash means "mirror this whole directory" (export deletes repo
 # copies of files you removed at home). Everything else is a single file.
-# This is a whitelist: anything not listed here never enters the repo.
+# This is a whitelist: anything not listed here never enters the repo, with one
+# exception -- .claude/mcp-servers.json, which export writes itself out of
+# Claude Code's user config so that install can print the matching
+# `claude mcp add-json` lines. See README, "Backup and restore".
 
 # --- shell / git ---------------------------------------------------------
 .zshrc
