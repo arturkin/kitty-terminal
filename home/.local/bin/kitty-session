@@ -15,7 +15,8 @@ Claude Code agent) and rebuild it afterwards, resuming each agent with
 `latest` is written continuously by session_watcher.py, so after a quit it
 holds the shape of the workspace you quit out of.
 
-Save flags:    --guard (skip a snapshot that is losing panes to a teardown).
+Save flags:    --guard (skip a snapshot that is losing panes to a teardown),
+               --quiet (no desktop notification; --guard implies it).
 Restore flags: --no-agents (shells only), --dry-run (print the plan).
 Snapshots live in ~/.local/state/kitty-sessions.
 """
@@ -231,16 +232,21 @@ def losing_panes(name: str, snap: dict) -> bool:
         return False
 
 
+QUIET = False  # --quiet: an automatic snapshot has nothing to announce
+
+
 def die(msg: str) -> None:
     """Errors have to reach the user even when kitty ran us from a key binding."""
-    report(f"error: {msg}")
+    report(f"error: {msg}", force=True)
     sys.exit(f"kitty-session: {msg}")
 
 
-def report(msg: str, detail: str = "") -> None:
+def report(msg: str, detail: str = "", force: bool = False) -> None:
     """Print when a human is watching, notify when kitty ran us from a key."""
     if sys.stdout.isatty():
         print(f"{msg}{' -> ' + detail if detail else ''}")
+        return
+    if QUIET and not force:
         return
     notify = Path.home() / ".local/bin/kitty-notify"
     if notify.exists():
@@ -249,8 +255,12 @@ def report(msg: str, detail: str = "") -> None:
 
 
 def main() -> None:
+    global QUIET
     argv = sys.argv[1:]
     flags = {a for a in argv if a.startswith("-")}
+    # --guard is only ever passed by session_watcher.py, so it means the same
+    # thing: an automatic snapshot, with nothing to announce.
+    QUIET = bool(flags & {"--quiet", "--guard"})
     args = [a for a in argv if not a.startswith("-")]
     action = args[0] if args else "save"
     name = args[1] if len(args) > 1 else None

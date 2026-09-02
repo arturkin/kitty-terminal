@@ -25,7 +25,7 @@ def _snapshot() -> None:
     _last = now
     # listen_on is unix:/tmp/kitty-{kitty_pid}, and we are in the kitty process
     env = dict(os.environ, KITTY_LISTEN_ON=f'unix:/tmp/kitty-{os.getpid()}')
-    subprocess.Popen([SAVE, 'save', 'latest', '--guard'], env=env,
+    subprocess.Popen([SAVE, 'save', 'latest', '--guard', '--quiet'], env=env,
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
