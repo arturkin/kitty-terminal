@@ -648,6 +648,40 @@ One consequence worth knowing: while the hook is installed it also overrides a
 deliberate `-e never`, because `0` is exactly what "never" sends. Exempt by
 `application_name` or `notification_types` in `main` if you ever want one back.
 
+### 13.2 Every notification leaks a process slot
+
+Found while asking why kitty was using 1.4 GB. It was not -- kitty's own RSS
+was 53 MB of a 1.9 GB *subtree* (five agents at 1080 MB, an automation Chrome
+under `chrome-devtools-mcp` at 587 MB, 13 `node` at 139 MB) -- but the process
+list held **313 zombies, every one a child of kitty**.
+
+They come from notifications, one per banner: 314 before sending three through
+`kitty-notify`, 317 after. Over 48 h of uptime that is ~6.5/h, which lines up
+with the 190-banners-a-day count above.
+
+The cause is the delivery route from §12.3. `kitten @ kitten notify` asks kitty
+to run a kitten, so kitty forks, and kitty never reaps it. There is no `notify`
+remote-control command to use instead (the command list is `action` ...
+`signal-child`; no `notify`), and the alternative -- writing OSC 99 to the
+pane's pty -- is what §12.3 rejected for good reason. So this is kitty's to
+fix; nothing here can avoid it while notifications stay pane-aware.
+
+The cost is process-table slots, not memory: a zombie holds ~0 RSS. On this
+machine 705 of the 2666 `kern.maxprocperuid` slots were in use, 317 of them
+zombies, leaving ~1961 -- about 12 days of continuous uptime at this rate
+before `fork()` starts failing. A kitty restart clears all of them, and §13.1
+already needs one.
+
+**The obvious culprit is the wrong one.** `session_watcher.py` does
+`subprocess.Popen(...)` and never waits, which looks exactly like this bug and
+is not it: CPython's `subprocess` reaps abandoned children itself -- `__del__`
+registers a still-running child in `subprocess._active` and the next `Popen()`
+calls `_cleanup()` over that list. Measured under `kitty +runpy`, 12 snapshots
+through the real module: the current code leaves **0** zombies, and a version
+that keeps the handles in a list to poll them leaves **1**, because the newest
+child has not been polled yet. Holding the references makes it worse. Leave it
+alone.
+
 ---
 
 ## 14. Reference
