@@ -86,7 +86,35 @@
     "ask": [
       "Bash(git push:*)"
     ],
-    "defaultMode": "auto"
+    "defaultMode": "auto",
+    "deny": [
+      "Read(**/*.p12)",
+      "Read(**/*.pem)",
+      "Read(**/*.pfx)",
+      "Read(**/.env)",
+      "Read(**/.env.*)",
+      "Read(**/credentials.json)",
+      "Read(**/id_ed25519)",
+      "Read(**/id_rsa)",
+      "Read(//Users/arturkin/.aws/**)",
+      "Read(//Users/arturkin/.bash_history)",
+      "Read(//Users/arturkin/.claude.json)",
+      "Read(//Users/arturkin/.claude/.credentials.json)",
+      "Read(//Users/arturkin/.config/doppler/**)",
+      "Read(//Users/arturkin/.config/gcloud/**)",
+      "Read(//Users/arturkin/.config/gh/**)",
+      "Read(//Users/arturkin/.docker/config.json)",
+      "Read(//Users/arturkin/.git-credentials)",
+      "Read(//Users/arturkin/.gitconfig)",
+      "Read(//Users/arturkin/.gnupg/**)",
+      "Read(//Users/arturkin/.kube/**)",
+      "Read(//Users/arturkin/.netrc)",
+      "Read(//Users/arturkin/.npmrc)",
+      "Read(//Users/arturkin/.pypirc)",
+      "Read(//Users/arturkin/.ssh/**)",
+      "Read(//Users/arturkin/.zsh_history)",
+      "Read(//Users/arturkin/.zsh_historydocker)"
+    ]
   },
   "model": "opus",
   "hooks": {
@@ -97,6 +125,16 @@
           {
             "type": "command",
             "command": "jq -r '.tool_input.command' | grep -qiE '\\bgit\\b[^|;&]*\\bpush\\b' && echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"ask\",\"permissionDecisionReason\":\"git push requires your explicit confirmation\"}}' || true"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash|Read|Grep|Glob",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/hooks/deny-sensitive-files.sh",
+            "statusMessage": "Checking for sensitive files..."
           }
         ]
       }
@@ -177,32 +215,32 @@
   "autoMode": {
     "soft_deny": [
       "$defaults",
-      "Bash(.bin/deploy-helm-prod.sh:*) in GuideToIceland/monorepo \u2014 prod Helm deploy script",
-      "Bash(.bin/cleanup-helm-prod.sh:*) in GuideToIceland/monorepo \u2014 prod Helm cleanup/delete script",
-      "Bash(.bin/uninstall-helm-prod.sh:*) in GuideToIceland/monorepo \u2014 prod Helm uninstall script"
+      "Bash(.bin/deploy-helm-prod.sh:*) in GuideToIceland/monorepo — prod Helm deploy script",
+      "Bash(.bin/cleanup-helm-prod.sh:*) in GuideToIceland/monorepo — prod Helm cleanup/delete script",
+      "Bash(.bin/uninstall-helm-prod.sh:*) in GuideToIceland/monorepo — prod Helm uninstall script"
     ],
     "environment": [
       "### Org-wide",
-      "**Organization**: GuideToIceland (github.com/GuideToIceland) \u2014 Travelshift",
-      "**Cloud provider(s)**: Google Cloud Platform (GCP) \u2014 Artifact Registry (europe-west2-npm.pkg.dev); AWS ECR also referenced (208676797693.dkr.ecr.eu-west-1.amazonaws.com)",
-      "**Repository visibility**: not queryable here \u2014 assuming private (default)",
-      "**Internal sharing / snippet hosting**: None configured \u2014 treat public paste/gist services as outside the trust boundary",
-      "**Secrets management**: Doppler (per CLAUDE.md \u2014 \"No secrets in code. Use environment variables, Doppler, or appsettings\"; \"No .env files in the repo\")",
-      "**Default / protected branches**: master (default branch); protection status not queryable here via gh \u2014 treat master as protected by convention pending verification",
+      "**Organization**: GuideToIceland (github.com/GuideToIceland) — Travelshift",
+      "**Cloud provider(s)**: Google Cloud Platform (GCP) — Artifact Registry (europe-west2-npm.pkg.dev); AWS ECR also referenced (208676797693.dkr.ecr.eu-west-1.amazonaws.com)",
+      "**Repository visibility**: not queryable here — assuming private (default)",
+      "**Internal sharing / snippet hosting**: None configured — treat public paste/gist services as outside the trust boundary",
+      "**Secrets management**: Doppler (per CLAUDE.md — \"No secrets in code. Use environment variables, Doppler, or appsettings\"; \"No .env files in the repo\")",
+      "**Default / protected branches**: master (default branch); protection status not queryable here via gh — treat master as protected by convention pending verification",
       "**CI/CD deploy targets**: GKE via Helm (helm/*/prod-values.yaml, helm/*/stage-values.yaml); deploy scripts in .bin/ (deploy-helm-prod.sh, deploy-helm-stage.sh, cleanup-helm-prod.sh, uninstall-helm-prod.sh, etc.)",
       "**Network posture**: None configured",
-      "**Source control**: GuideToIceland/monorepo (origin: https://github.com/GuideToIceland/monorepo.git) \u2014 this repo and its remote only",
+      "**Source control**: GuideToIceland/monorepo (origin: https://github.com/GuideToIceland/monorepo.git) — this repo and its remote only",
       "**Trusted internal domains**: guidetoiceland.is (from .gitignore cert path secure.dev.guidetoiceland.is+3-key.pem)",
-      "**Trusted cloud buckets**: assets-web-staging-tshiftcdn (config-derived \u2014 not a confirmed upload destination; uploads of local data still require confirmation)",
+      "**Trusted cloud buckets**: assets-web-staging-tshiftcdn (config-derived — not a confirmed upload destination; uploads of local data still require confirmation)",
       "**Key internal services**: europe-west2-npm.pkg.dev (Google Artifact Registry, @travelshift npm scope); 208676797693.dkr.ecr.eu-west-1.amazonaws.com (AWS ECR)",
-      "**Internal package registry**: europe-west2-npm.pkg.dev (Google Artifact Registry \u2014 @travelshift scope, per CLAUDE.md)",
-      "**Sensitive data locations & audiences**: CI secrets referenced in workflows (BROWSERSTACK_ACCESS_KEY, GCP_SA_KEY_PROD, GCP_SA_KEY_STAGE, GITHUB_TOKEN, GTIBOT_REPO_TOKEN, PROJECT_ID_PROD, PROJECT_ID_STAGE, UI_AUTOMATION_AQUALITY_TOKEN) \u2014 names only, never values; .env and TLS key files (.gitignore); PII noted in .NET service docs (service-profile GDPR erasure, payments PCI scope) \u2014 share only with audiences cleared at the [named+specifics] bar",
+      "**Internal package registry**: europe-west2-npm.pkg.dev (Google Artifact Registry — @travelshift scope, per CLAUDE.md)",
+      "**Sensitive data locations & audiences**: CI secrets referenced in workflows (BROWSERSTACK_ACCESS_KEY, GCP_SA_KEY_PROD, GCP_SA_KEY_STAGE, GITHUB_TOKEN, GTIBOT_REPO_TOKEN, PROJECT_ID_PROD, PROJECT_ID_STAGE, UI_AUTOMATION_AQUALITY_TOKEN) — names only, never values; .env and TLS key files (.gitignore); PII noted in .NET service docs (service-profile GDPR erasure, payments PCI scope) — share only with audiences cleared at the [named+specifics] bar",
       "**Data retention / declassification**: None configured",
-      "**Sensitive remote targets**: any host/namespace with `prod`/`production` as a whole segment \u2014 e.g. helm/*/prod-values.yaml releases, .bin/deploy-helm-prod.sh, .bin/cleanup-helm-prod.sh, .bin/uninstall-helm-prod.sh, .bin/prod-envs.sh, GCP_SA_KEY_PROD/PROJECT_ID_PROD-scoped deploys, infrastructure/clickhouse/prod/",
+      "**Sensitive remote targets**: any host/namespace with `prod`/`production` as a whole segment — e.g. helm/*/prod-values.yaml releases, .bin/deploy-helm-prod.sh, .bin/cleanup-helm-prod.sh, .bin/uninstall-helm-prod.sh, .bin/prod-envs.sh, GCP_SA_KEY_PROD/PROJECT_ID_PROD-scoped deploys, infrastructure/clickhouse/prod/",
       "**Protected deployment namespaces / environments**: prod Helm releases (helm/*/prod-values.yaml across connector-*, service-*, importer-*, admin-system, clientapi, etc.) and stage releases as secondary (helm/*/stage-values.yaml, .bin/deploy-helm-stage.sh)",
-      "**Protected IaC scopes**: IAM, RBAC, networking, quota, node-pool resources; anything tagged prod/production \u2014 includes infrastructure/pulumi, infrastructure/gcp, infrastructure/clickhouse/prod/, and Helm prod-values.yaml releases",
+      "**Protected IaC scopes**: IAM, RBAC, networking, quota, node-pool resources; anything tagged prod/production — includes infrastructure/pulumi, infrastructure/gcp, infrastructure/clickhouse/prod/, and Helm prod-values.yaml releases",
       "### User-specific",
-      "**Primary use of Claude Code**: software development (Travelshift monorepo \u2014 JS/TS, .NET, Go, PHP services; Helm/Pulumi IaC)",
+      "**Primary use of Claude Code**: software development (Travelshift monorepo — JS/TS, .NET, Go, PHP services; Helm/Pulumi IaC)",
       "**Trusted repo**: GuideToIceland/monorepo (this repo, working directory /Users/arturkin/Work/monorepo-nl-link) and its origin remote only",
       "**Org-specific CLIs**: gcloud (GCP auth for Artifact Registry token), doppler (secrets), helm, kubectl, gh, coderabbit",
       "**routine under src/js/web/ prefix**: npm/yarn workspace commands (npm run, yarn run) per CLAUDE.md build/test instructions"
