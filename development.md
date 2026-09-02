@@ -437,14 +437,41 @@ pane. `kitty-notify` wraps this, falling back to `/dev/tty` and then
 | Event | What it does |
 |---|---|
 | `UserPromptSubmit` | writes a start timestamp; prints nothing, because this event's stdout is injected into the model's context |
-| `Notification` | Claude wants input or permission → notify, `critical` |
-| `Stop` | turn ended → notify only if it ran ≥ 20s |
+| `Notification` | Claude is blocked on you → notify; the types that only report progress are dropped |
+| `Stop` | turn ended → notify only if it ran ≥ 2 min |
 
-Both notifying events first ask kitty whether you are already looking at the
-pane (`is_focused` on the window in `kitten @ ls`, which is false whenever kitty
-is not the frontmost app) and stay silent if you are. `--identifier
-claude-<session_id>` means a busy agent replaces its own banner rather than
-stacking them.
+Both notifying events first ask kitty whether the pane is on screen, and stay
+silent if it is. `is_focused` on the window looks like that question and is
+not. Measured against `kitten @ ls` 0.48.2, a window's `is_focused` means *the
+active window of its tab, and kitty is in front*: it stays true for the active
+pane of a **background tab**, and false for the three panes of the 2×2 you are
+plainly looking at. On its own it therefore silenced the tab you had walked
+away from and notified from the panes in front of your face — most of the noise
+came from there, because §2's startup 2×2 leaves three panes unfocused at all
+times.
+
+Tab focus is the half that behaves. With Finder brought forward, `is_focused`
+went false on the OS window, on both tabs and on every window; bringing kitty
+back set them true again. So *on screen* is derived from the tab: its
+`is_focused`, plus this pane being the top of its window group (`groups` is a
+pane and its overlays, last one on top), plus — under `stack`, the one layout
+that draws a single pane — being the focused window.
+
+Nor is every `Notification` a question. The event carries `notification_type`,
+and `idle_prompt` is sent `messageIdleNotifThresholdMs` (60 s) after a turn
+*completes* if you have not typed since — not Claude waiting on anything, just
+the turn `Stop` already reported, a minute later. It is dropped, with the other
+types that report rather than ask (`agent_completed`, `auth_success`,
+`computer_use_*`, `elicitation_complete`); anything unrecognised still
+notifies, so a new kind of question is not swallowed. Dropping it here is only
+half the job — Claude Code sends its own banner for the same event through
+`preferredNotifChannel`, which §13 turns off.
+
+A `Stop` with no start stamp says nothing rather than guessing a duration: it
+means no turn was timed, most often a second `Stop` for one already reported.
+
+`--identifier claude-<session_id>` means a busy agent replaces its own banner
+rather than stacking them.
 
 `notify_on_cmd_finish unfocused 10.0` covers everything that is not an agent:
 builds, installs, test runs.
@@ -492,7 +519,98 @@ save before-refactor`) never expire.
 
 ---
 
-## 13. Reference
+## 13. Focus: what raises the kitty app
+
+Measured on 2026-09-01, chasing "kitty constantly takes focus". Every trial ran
+only while kitty was off-front **and** macOS `HIDIdleTime` showed the keyboard
+untouched for 2.5s+, so a human switching apps could not be mistaken for the
+app raising itself. A do-nothing control ran in every pass and never fired.
+
+| Mechanism | Result |
+|---|---|
+| control: do nothing | clean 3/3 |
+| `kitty @ launch --type=overlay --keep-focus` | **raises kitty 3/3** |
+| `kitty @ launch --type=tab --keep-focus` | **raises kitty** |
+| notification via `kitty-notify` (remote control) | clean |
+| OSC 99 notification written to a pty | clean |
+| terminal bell | clean |
+| `CSI 5t` (raise window escape) | clean |
+| `osascript display notification` | clean 3/3 |
+
+**Creating a kitty window over remote control activates the app on macOS.**
+`--keep-focus` does not prevent it: it is documented as keeping focus on the
+current window *inside* kitty, and no kitty option governs app activation
+(the full option list has nothing for it -- `macos_*` covers chrome, colours
+and the menubar only). The `--type=tab` reading needed the passive watcher to
+catch: scoring the front app 2s after the launch called it clean, while the
+watcher had recorded kitty gaining focus during the trial.
+
+So the everyday cause is **agents**, not configuration. Anything an agent runs
+that makes a window -- `kdiff`, `wt`, `workmux add`, the `F2` picker's own
+overlay -- pulls the app forward, which reads exactly like random focus theft
+when four agents work in parallel. Notifications are innocent, which is worth
+knowing before anyone reaches for `filter_notification` or a
+`notifications.py` hook: both were tried here and reverted, because stripping
+`Action.focus` costs click-to-focus on a banner and fixes nothing.
+
+Two useful instruments, if this comes up again: log transitions into kitty with
+`lsappinfo front` plus `HIDIdleTime` (idle near zero means you did it; a large
+value means software did), and never run a focus experiment while something
+else is driving kitty over remote control -- two earlier rounds produced a
+false positive that way, blaming an OSC 99 notification for a steal that was
+in fact a concurrent overlay launch.
+
+### The agent toast, settled from the system log
+
+Better than any probe: macOS already records both halves of the question, so a
+day of real usage can be audited after the fact instead of staged.
+
+    # every change of frontmost app, with the pid that lost it
+    log show --start "$DAY 09:00:00" --style compact \
+      --predicate 'subsystem == "com.apple.processmanager"' | grep SETFRONT
+    # physical input, 1-5ms before any switch a human made
+    log show ... --predicate 'process == "WindowServer" AND
+      (eventMessage CONTAINS "buttonState changed" OR eventMessage CONTAINS "keyCode")'
+    # every banner macOS actually put on screen, per app
+    log show ... --predicate 'process == "usernoted" AND eventMessage CONTAINS "Presenting"'
+
+A kitty focus gain with a mouse or key event in the preceding 400ms is one you
+made; one with nothing before it is the app raising itself. Over 2026-09-01:
+**255 focus gains, 190 kitty banners, and not one banner followed by a
+self-raise.** 18 focus gains landed within 5s of a banner and every one of
+them had a click 1-60ms before it. The 32 genuine self-raises show lags of
+34-500s from the nearest banner -- no relationship -- and 20 of them are this
+session's own test overlays.
+
+So the toast does not take focus. What it did do is *wait* for a click:
+`-u critical` made macOS present it with the legacy alert option set
+(`["badge", "sound", "alert"]`) rather than a self-dismissing banner
+(`["sound", "list", "banner"]`), so it sat over whatever you were doing until
+clicked -- and the click is what moved focus, exactly as `a=focus` promises.
+Both halves are now fixed in `kitty-notify`: normal urgency, and
+`--expire-after 10s` on every notification, which kitty enforces itself
+(measured: removed 9.9s after presentation) and which also stops them piling
+up in Notification Center, 21 deep by mid-afternoon.
+
+That expiry only governs the banners `kitty-notify` sends, which is not all of
+them. Claude Code has its own OS notification channel: `preferredNotifChannel`
+defaults to `auto`, which detects kitty and sends OSC 99 itself — titled
+`Claude Code`, with no expiry, so those still pile up. Seven "Claude is waiting
+for your input" were sitting in Notification Center inside 21 minutes, none of
+them from the hook. The title tells them apart: the hook's read `Claude needs
+you · <worktree>` and `Claude finished · <worktree>`, the built-in ones read
+`Claude Code`. `preferredNotifChannel: "notifications_disabled"` in
+`settings.json` silences the channel without touching hooks — in `Ov` the
+`Notification` hook is awaited *before* the channel is consulted, so the hook
+fires either way.
+
+One trap if you do reach for a `notifications.py` hook: kitty will not pick up
+a newly created one on `load_config_file`. A probe hook that logged every
+notification it saw was never called, and restarting kitty kills every agent.
+
+---
+
+## 14. Reference
 
 - kitty config: <https://sw.kovidgoyal.net/kitty/conf/>
 - kitty layouts: <https://sw.kovidgoyal.net/kitty/layouts/>

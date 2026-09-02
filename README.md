@@ -260,18 +260,34 @@ Preview.app (`~/.config/kitty/open-actions.conf`).
 
 Two kinds, both native:
 
-- **Agents.** `~/.claude/hooks/kitty-notify.py` fires when Claude Code asks for
-  input or permission, and when a turn that took ≥ 20s finishes. The banner
+- **Agents.** `~/.claude/hooks/kitty-notify.py` fires when Claude Code is
+  blocked on you — a permission prompt, a question — and when a turn that took
+  ≥ 2 min finishes. Claude's own idle ping, which arrives a minute after a turn
+  ends and says nothing the finish notification did not, is dropped. The banner
   names the worktree, and **clicking it focuses that pane**.
 - **Everything else.** `notify_on_cmd_finish unfocused 10.0` — any command that
   runs longer than 10s in a pane you are not watching.
 
-Nothing fires while you are actually looking at the pane: kitty reports
-per-window focus, and being in another app counts as not looking. Delivery goes
+Nothing fires while the pane is on your screen, and every pane of the 2×2
+counts — not just the one holding the cursor. Another app in front, another tab,
+or an overlay drawn over the pane all count as not looking. Delivery goes
 through remote control, so the escape code never touches the pty a TUI is
 drawing on.
 
-`kitty-notify "title" "body"` sends one by hand from any script.
+Claude Code's own notifications are off — `preferredNotifChannel:
+"notifications_disabled"` in `settings.json`. They were a second, unexpiring
+copy of the same events, titled `Claude Code` rather than naming the pane, and
+they stacked up in Notification Center. Hooks are unaffected by that setting.
+
+Every banner self-dismisses after 10s and leaves nothing in Notification
+Center, so none of them ever waits to be clicked. That matters more than it
+sounds: delivering a notification does not move focus, but *clicking* one does,
+and a banner parked over your work is a banner you end up clicking. See
+development.md 13 for the audit -- 190 banners in a day, none of which took
+focus on its own.
+
+`kitty-notify "title" "body"` sends one by hand from any script; `-e never`
+keeps one until you dismiss it, `-u critical` brings back the sticky style.
 
 ## Session snapshots
 
@@ -378,6 +394,12 @@ idempotent — re-run `wt-link` any time.
 
 `workmux remove` does **not** follow the symlinks; the shared `node_modules` is
 safe.
+
+One thing that is *not* configuration, and worth knowing before hunting for a
+setting: **creating a kitty window over remote control brings the app to the
+front on macOS**, `--keep-focus` or not. So an agent that runs `kdiff`, `wt` or
+`workmux add` in a pane pulls kitty forward while you are in another app.
+Notifications do not do this — see development.md 13 for the measurements.
 
 ## Which IDE
 

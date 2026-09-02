@@ -172,6 +172,7 @@
   "autoContinueAtUsageLimit": false,
   "remoteControlAtStartup": false,
   "agentPushNotifEnabled": true,
+  "preferredNotifChannel": "notifications_disabled",
   "skipAutoPermissionPrompt": true,
   "autoMode": {
     "soft_deny": [
