@@ -3,16 +3,18 @@
 
 kitty is the registry: `kitty @ ls` reports every OS window, tab and pane
 along with the processes in each pane's foreground group. This walks down
-from each pane's child process, treats shells as transparent, and reports
-the topmost real command per branch -- so a Claude Code pane is one `claude`
-row, not five rows of MCP servers and language servers. CPU and memory for
-that row cover its whole subtree, which is what a kill takes down.
+from every window of every pane and reports each real command it finds, with
+everything running underneath it nested below -- so a Claude Code pane is a
+`claude` row carrying its MCP servers, its language server and every command
+the agent currently has running. Shells that only stand in front of a command
+are walked through rather than listed. CPU and memory on a job row cover its
+whole subtree, which is what a kill takes down.
 
     kjobs            the picker (bound to F2 in kitty.conf)
     kjobs --json     the same rows as JSON, for scripts and verification
 
-Keys: j/k move, space mark, tab show a row's children, s cycle sort,
-x SIGTERM, X SIGKILL, enter focus that pane, r refresh, q quit. Killing a
+Keys: j/k move, space mark, tab fold a row's children away, s cycle sort,
+x SIGTERM, X SIGKILL, enter focus that pane, r refresh, q or F2 quit. Killing a
 job signals its process group; killing one of its children signals only
 that process.
 """
@@ -26,16 +28,15 @@ import sys
 import time
 from glob import glob
 
-# Walked through rather than reported: a pane's own shell plumbing. kitty
-# starts panes as `login -f -l -p USER kitten run-shell --shell /bin/zsh`,
-# so `login` and `kitten` are part of the plumbing too, not jobs.
-TRANSPARENT = {
-    'zsh', '-zsh', 'bash', '-bash', 'sh', '-sh', 'fish', '-fish', 'dash',
-    'login', '-login', 'kitten', 'kitty',
-}
+# A pane's own shell plumbing, walked through rather than reported: kitty
+# starts panes as `login -f -l -p USER kitten run-shell --shell /bin/zsh`.
+PLUMBING = {'login', 'kitten', 'kitty'}
+SHELLS = {'zsh', 'bash', 'sh', 'fish', 'dash', 'ksh', 'csh', 'tcsh'}
 AGENTS = {'claude'}
-# `node /Users/x/.nvm/versions/node/v24.11.0/bin/yarn dev` is `yarn dev`.
-INTERPRETERS = {'node', 'python', 'python3', 'ruby', 'perl', 'bun', 'deno'}
+# `node /Users/x/.nvm/versions/node/v24.11.0/bin/yarn dev` is `yarn dev`, and
+# `bash /Users/x/.local/bin/wt-help` is `wt-help`.
+INTERPRETERS = {'node', 'python', 'python3', 'ruby', 'perl', 'bun', 'deno',
+                'sh', 'bash', 'zsh', 'fish'}
 TERM_GRACE = 8.0  # how long a row keeps saying "terminating..."
 SORTS = ('tab', 'cpu', 'mem', 'age')
 
@@ -135,11 +136,47 @@ def basename_of(args: str) -> str:
     return os.path.basename(first).strip('()')
 
 
+def shell_name(args: str) -> str:
+    """basename_of without the leading `-` a login shell puts in its argv[0]."""
+    return basename_of(args).lstrip('-')
+
+
+def is_wrapper(args: str) -> bool:
+    """A `shell -c …` standing in front of the command it was given.
+
+    Claude Code runs every Bash tool call as one of these, so without walking
+    through them the tree is a wall of `zsh -c source snapshot-….sh …` with
+    the command you care about hidden one level under each.
+    """
+    tokens = args.split()
+    if shell_name(args) not in SHELLS or len(tokens) < 2:
+        return False
+    # `-c`, and clusters like `-lc`; never a long option such as `--command`.
+    return any(t.startswith('-') and not t.startswith('--') and 'c' in t[1:]
+               for t in tokens[1:3])
+
+
+def is_transparent(args: str) -> bool:
+    """True for what stands between a pane and the commands actually running.
+
+    Pane plumbing, a `-c` wrapper, and a shell that was given no work of its
+    own -- an interactive or login shell, however many flags it carries. A
+    shell handed a script (`sh ./run_main.sh`) is a command in its own right.
+    """
+    if shell_name(args) in PLUMBING:
+        return True
+    if shell_name(args) not in SHELLS:
+        return False
+    return is_wrapper(args) or all(t.startswith('-') for t in args.split()[1:])
+
+
 def pretty_cmd(args: str) -> str:
     """The command as you would have typed it: no interpreter, no full paths."""
     tokens = args.split()
     if not tokens:
         return args
+    if is_wrapper(args):
+        return f'{shell_name(args)} -c …'  # the script body is never readable
     if (os.path.basename(tokens[0]) in INTERPRETERS and len(tokens) > 1
             and tokens[1].startswith('/')):
         tokens = tokens[1:]
@@ -156,22 +193,30 @@ def ancestors(pid: int, table: dict[int, dict]) -> set[int]:
 
 
 def topmost_jobs(pid: int, table, kids, depth: int = 0) -> list[dict]:
-    """Descend from pid through shells; report the first real command found."""
+    """Descend from pid through shells; report the first real commands found."""
     if depth > 12:
         return []
     proc = table.get(pid)
     if proc is None:
         return []
-    if basename_of(proc['args']) not in TRANSPARENT:
+    if not is_transparent(proc['args']):
         return [proc]
     jobs: list[dict] = []
     for kid in kids.get(pid, ()):
         jobs.extend(topmost_jobs(kid, table, kids, depth + 1))
+    # A wrapper with nothing under it has no command to defer to: whatever it
+    # is doing, it is doing itself, so report it rather than lose it.
+    if not jobs and is_wrapper(proc['args']):
+        return [proc]
     return jobs
 
 
 def subtree(pid: int, table, kids, depth: int = 1) -> list[tuple[int, dict]]:
-    """(depth, proc) for every descendant of pid, in tree order."""
+    """(depth, proc) for every descendant of pid -- what a kill takes down.
+
+    Shell wrappers included: they are not worth a row, but their CPU and
+    memory are still charged to the job that a kill would remove.
+    """
     out: list[tuple[int, dict]] = []
     if depth > 12:
         return out
@@ -184,20 +229,38 @@ def subtree(pid: int, table, kids, depth: int = 1) -> list[tuple[int, dict]]:
     return out
 
 
-def tab_name(tab: dict, panes: list[dict]) -> str:
-    """The tab's name as the tab bar shows it when no overlay is covering it.
+def real_tree(pid: int, table, kids, depth: int = 1) -> list[tuple[int, dict]]:
+    """(depth, proc) for every real command below pid, wrappers walked through.
+
+    A skipped wrapper takes its depth with it, so the command it was running
+    sits directly under the job rather than one level in from nothing.
+    """
+    out: list[tuple[int, dict]] = []
+    if depth > 12:
+        return out
+    for kid in kids.get(pid, ()):
+        for proc in topmost_jobs(kid, table, kids):
+            out.append((depth, proc))
+            out.extend(real_tree(proc['pid'], table, kids, depth + 1))
+    return out
+
+
+def tab_name(tab: dict, windows: list[dict], mine: set[int]) -> str:
+    """The tab's name as the tab bar shows it, ignoring this picker's overlay.
 
     An unnamed tab takes its title from the active window, and this picker is
     itself an overlay -- so reading tab['title'] would label the tab you pressed
-    F2 in "Running".
+    F2 in "Running". Other overlays are left in: when `wt-help` is up, the tab
+    bar really does say "Shortcuts".
     """
-    if tab.get('title_overridden') or not panes:
+    others = [w for w in windows if w['pid'] not in mine]
+    if tab.get('title_overridden') or not others:
         return tab['title']
-    by_id = {w['id']: w for w in panes}
+    by_id = {w['id']: w for w in others}
     for window_id in tab.get('active_window_history', ()):
         if window_id in by_id:
             return by_id[window_id]['title'] or tab['title']
-    return panes[0]['title'] or tab['title']
+    return others[0]['title'] or tab['title']
 
 
 def session_label(title: str) -> str:
@@ -232,13 +295,20 @@ def collect() -> list[dict]:
     rows: list[dict] = []
     for wi, osw in enumerate(os_windows, 1):
         for tab in osw['tabs']:
-            # A group is one pane plus the overlays stacked on it, base first;
-            # overlays (pagers, kdiff, this picker) hold no jobs of their own.
-            overlays = {wid for group in tab.get('groups', ())
-                        for wid in group['windows'][1:]}
-            panes = [w for w in tab['windows'] if w['id'] not in overlays]
-            tab_label = tab_name(tab, panes)
-            for pi, win in enumerate(panes, 1):
+            # A group is one pane: its base window plus any overlay stacked on
+            # it. kitty does not say which member is the base -- it reorders the
+            # list as they are focused, so `windows[0]` is not it -- and there is
+            # no need to know: every window of a group shares the group's pane
+            # number, and an overlay running something (`wt-help`, `kdiff`) is a
+            # job like any other.
+            by_id = {w['id']: w for w in tab['windows']}
+            groups = tab.get('groups') or [{'windows': [w['id']]}
+                                           for w in tab['windows']]
+            panes = [(pi, by_id[wid])
+                     for pi, group in enumerate(groups, 1)
+                     for wid in group['windows'] if wid in by_id]
+            tab_label = tab_name(tab, tab['windows'], mine)
+            for pi, win in panes:
                 # kitty knows each foreground process's own cwd; ps does not.
                 fg_cwd = {p['pid']: p['cwd']
                           for p in win.get('foreground_processes', ())
@@ -258,6 +328,7 @@ def collect() -> list[dict]:
                         where = f'win{wi} · ' + where
 
                     descendants = subtree(proc['pid'], table, kids)
+                    shown = real_tree(proc['pid'], table, kids)
                     cpu_seconds = proc['cpu_seconds'] + sum(
                         p['cpu_seconds'] for _, p in descendants)
                     rss_kb = proc['rss_kb'] + sum(
@@ -305,7 +376,7 @@ def collect() -> list[dict]:
                             'kill_group': False,
                             'depth': depth,
                             'children': [],
-                        } for depth, child in descendants],
+                        } for depth, child in shown],
                     })
     stale = set(_cpu_prev) - {r['pid'] for r in rows} - {
         c['pid'] for r in rows for c in r['children']}
@@ -398,8 +469,8 @@ def truncate(text: str, width: int) -> str:
 # --------------------------------------------------------------------------
 # TUI
 # --------------------------------------------------------------------------
-HELP = ('[j/k] move  [space] mark  [tab] children  [s] sort  [x] TERM  '
-        '[X] KILL  [↵] focus pane  [r] refresh  [q] close')
+HELP = ('[j/k] move  [space] mark  [tab] fold  [s] sort  [x] TERM  '
+        '[X] KILL  [↵] focus pane  [r] refresh  [q/F2] close')
 
 
 class Picker:
@@ -409,7 +480,9 @@ class Picker:
         self.visible: list[dict] = []
         self.cursor = 0
         self.marked: set[int] = set()
-        self.expanded: set[int] = set()
+        # Tracked as the exception, so a job that appears between refreshes
+        # arrives with its tree open rather than needing a keypress.
+        self.collapsed: set[int] = set()
         self.dying: dict[int, float] = {}
         self.sort = 'tab'
         self.message = ''
@@ -420,6 +493,7 @@ class Picker:
     def load(self) -> None:
         keep = self.visible[self.cursor]['pid'] if self.visible else None
         self.jobs = sort_rows(collect(), self.sort)
+        self.collapsed &= {job['pid'] for job in self.jobs}
         self.flatten()
         alive = {row['pid'] for row in self.visible}
         self.marked &= alive
@@ -434,11 +508,11 @@ class Picker:
         self.last_load = time.monotonic()
 
     def flatten(self) -> None:
-        """Jobs, each followed by its children when it is expanded."""
+        """Jobs, each followed by its children unless it has been folded."""
         self.visible = []
         for job in self.jobs:
             self.visible.append(job)
-            if job['pid'] in self.expanded:
+            if job['pid'] not in self.collapsed:
                 self.visible.extend(job['children'])
 
     def row(self) -> dict | None:
@@ -460,8 +534,10 @@ class Picker:
         scr.erase()
         height, width = scr.getmaxyx()
 
-        live = sum(1 for job in self.jobs if not job['agent'])
-        agents = len(self.jobs) - live
+        # Every real command, folded away or not -- the count is what is
+        # running, not what happens to be on screen.
+        agents = sum(1 for job in self.jobs if job['agent'])
+        live = sum(1 + len(job['children']) for job in self.jobs) - agents
         cpu = sum(job['cpu'] for job in self.jobs)
         mem = sum(job['mem_kb'] for job in self.jobs)
         left = f' Running ({live})  ·  {short_cpu(cpu)} cpu  ·  {short_mem(mem)}'
@@ -506,7 +582,7 @@ class Picker:
 
         where_w, cmd_w, cwd_w = self.columns(width)
         if row['children']:
-            glyph = '▾ ' if row['pid'] in self.expanded else '▸ '
+            glyph = '▸ ' if row['pid'] in self.collapsed else '▾ '
         else:
             glyph = '  '
         cmd = 'terminating…' if dying else row['cmd']
@@ -567,7 +643,7 @@ class Picker:
         row = self.row()
         if row is None or row['depth'] or not row['children']:
             return
-        self.expanded ^= {row['pid']}
+        self.collapsed ^= {row['pid']}
         self.flatten()
         self.cursor = self.visible.index(row)
 
@@ -594,7 +670,10 @@ class Picker:
             self.draw()
             key = self.screen.getch()
             last = max(0, len(self.visible) - 1)
-            if key in (ord('q'), ord('Q'), 27):
+            # F2 opened this; kitty.conf unmaps it while the list is focused
+            # so that the second press arrives here and closes it, rather than
+            # stacking a second overlay on top of the first.
+            if key in (ord('q'), ord('Q'), 27, curses.KEY_F2):
                 return
             if key in (ord('j'), curses.KEY_DOWN):
                 self.cursor = min(self.cursor + 1, last)
