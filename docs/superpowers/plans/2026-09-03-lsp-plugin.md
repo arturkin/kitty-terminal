@@ -150,7 +150,7 @@ git commit -m "Record what workspaceFolder does with CLAUDE_PROJECT_DIR"
 
 The two servers that need no wrapper, so this task proves the delivery mechanism — plugin loads, takes over from the official plugins, nothing double-claims an extension.
 
-**Task 0 outcome:** _not yet run (first attempt invalidated -- see Task 0)._
+**Task 0 outcome:** `workspaceFolder` expands `${CLAUDE_PROJECT_DIR}`; keep it on all five servers.
 
 **Files:**
 - Create: `home/.claude/skills/lsp/.claude-plugin/plugin.json`
