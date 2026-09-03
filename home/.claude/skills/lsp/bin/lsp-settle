@@ -1,0 +1,77 @@
+#!/usr/bin/env node
+// Usage: lsp-settle <ms> <command> [args...]
+//
+// Claude Code sends textDocument/didOpen and the request that follows it
+// back to back. A server that indexes asynchronously answers the first one
+// with an empty result instead of waiting -- a false negative, which is worse
+// than a slow answer: the caller concludes the symbol has no definition.
+// some-sass and graphql-lsp both do this, and both need ~100ms.
+//
+// This holds back only the first textDocument/* request of the session by
+// <ms>, giving the server that long to finish indexing what didOpen just
+// handed it. Everything else is a straight pipe. Measured from the request's
+// arrival, not from spawn: startup latency varies and would otherwise eat the
+// whole budget.
+'use strict';
+const { spawn } = require('child_process');
+
+const delayMs = parseInt(process.argv[2], 10);
+const argv = process.argv.slice(3);
+if (!Number.isFinite(delayMs) || argv.length === 0) {
+  process.stderr.write('usage: lsp-settle <ms> <command> [args...]\n');
+  process.exit(2);
+}
+
+const child = spawn(argv[0], argv.slice(1), { stdio: ['pipe', 'inherit', 'inherit'] });
+child.on('error', e => { process.stderr.write('lsp-settle: ' + e.message + '\n'); process.exit(127); });
+child.on('exit', (code, sig) => process.exit(sig ? 1 : code === null ? 1 : code));
+
+let held = false;      // the one-shot delay has been spent
+let queue = Promise.resolve();
+let buf = Buffer.alloc(0);
+
+// Forwarding is serialised through a promise chain so a held message cannot be
+// overtaken by the ones behind it -- LSP is order-sensitive.
+function forward(chunk, wait) {
+  queue = queue.then(() => new Promise(resolve => {
+    if (!wait) { child.stdin.write(chunk); return resolve(); }
+    setTimeout(() => { child.stdin.write(chunk); resolve(); }, wait);
+  }));
+}
+
+process.stdin.on('data', chunk => {
+  buf = Buffer.concat([buf, chunk]);
+  for (;;) {
+    const sep = buf.indexOf('\r\n\r\n');
+    if (sep < 0) break;
+    const m = /content-length:\s*(\d+)/i.exec(buf.slice(0, sep).toString('ascii'));
+    // Unparseable framing is not ours to repair: hand it over untouched.
+    if (!m) { forward(buf.slice(0, sep + 4), 0); buf = buf.slice(sep + 4); continue; }
+    const len = parseInt(m[1], 10);
+    if (buf.length < sep + 4 + len) break;
+    const frame = buf.slice(0, sep + 4 + len);
+    buf = buf.slice(sep + 4 + len);
+
+    let msg = null;
+    try { msg = JSON.parse(frame.slice(sep + 4).toString('utf8')); } catch {}
+
+    // A message with an id but no method is our answer to something the server
+    // asked us. It must never queue behind a held request: graphql-lsp will not
+    // finish loading its schema until its workspace/configuration is answered,
+    // so holding that reply is what a delay was supposed to avoid.
+    if (msg && msg.id !== undefined && msg.method === undefined) {
+      child.stdin.write(frame);
+      continue;
+    }
+
+    let wait = 0;
+    if (!held && msg && msg.id !== undefined
+        && typeof msg.method === 'string' && msg.method.startsWith('textDocument/')) {
+      held = true;
+      wait = delayMs;
+    }
+    forward(frame, wait);
+  }
+});
+
+process.stdin.on('end', () => { queue.then(() => child.stdin.end()); });

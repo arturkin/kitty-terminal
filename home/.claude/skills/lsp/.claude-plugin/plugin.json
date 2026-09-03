@@ -91,8 +91,8 @@
       "extensionToLanguage": { ".css": "css", ".less": "less" }
     },
     "scss": {
-      "command": "some-sass-language-server",
-      "args": ["--stdio"],
+      "command": "${CLAUDE_PLUGIN_ROOT}/bin/lsp-settle",
+      "args": ["500", "some-sass-language-server", "--stdio"],
       "workspaceFolder": "${CLAUDE_PROJECT_DIR}",
       "settings": {
         "somesass": {
@@ -103,7 +103,8 @@
       "extensionToLanguage": { ".scss": "scss", ".sass": "sass" }
     },
     "graphql": {
-      "command": "${CLAUDE_PLUGIN_ROOT}/bin/graphql-launch",
+      "command": "${CLAUDE_PLUGIN_ROOT}/bin/lsp-settle",
+      "args": ["500", "${CLAUDE_PLUGIN_ROOT}/bin/graphql-launch"],
       "workspaceFolder": "${CLAUDE_PROJECT_DIR}",
       "extensionToLanguage": { ".graphql": "graphql", ".gql": "graphql" }
     },
