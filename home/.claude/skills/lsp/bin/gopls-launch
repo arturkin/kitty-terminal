@@ -13,8 +13,28 @@ root="${CLAUDE_PROJECT_DIR:-$PWD}"
 # alone: setting GOWORK on those changes what gopls resolves, for the worse.
 if [ -z "${GOWORK:-}" ] && [ ! -e "$root/go.work" ] && [ ! -e "$root/go.mod" ]; then
   mods=()
+  mod_paths=()
   while IFS= read -r m; do
-    mods+=("$(dirname "$m")")
+    dir="$(dirname "$m")"
+    modpath="$(awk '/^module /{print $2; exit}' "$m")"
+
+    # Two modules can declare the same module path (copy-pasted from a
+    # template, never renamed). go.work requires unique paths across its
+    # `use` entries, so keep only the first such directory, in sorted order.
+    dup=0
+    if [ -n "$modpath" ] && [ "${#mod_paths[@]}" -gt 0 ]; then
+      for p in "${mod_paths[@]}"; do
+        if [ "$p" = "$modpath" ]; then
+          dup=1
+          break
+        fi
+      done
+    fi
+
+    if [ "$dup" -eq 0 ]; then
+      [ -n "$modpath" ] && mod_paths+=("$modpath")
+      mods+=("$dir")
+    fi
   done < <(find "$root" -maxdepth 6 -name go.mod \
              -not -path '*/vendor/*' -not -path '*/node_modules/*' \
              -not -path '*/.git/*' 2>/dev/null | sort)
