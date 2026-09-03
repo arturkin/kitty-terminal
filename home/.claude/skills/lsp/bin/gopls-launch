@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# gopls, with the project's Go modules joined into a generated go.work.
+# Several go.mod under one repo and no go.work makes every cross-module import
+# unresolvable no matter where the server is rooted; GOWORK is the only fix
+# gopls accepts. The file is generated outside the repo so a company checkout
+# stays clean -- the cost is that a shell `go build` does not see it.
+set -euo pipefail
+export PATH="$HOME/go/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+
+root="${CLAUDE_PROJECT_DIR:-$PWD}"
+
+# A single-module repo, or one that already declares its own workspace, is left
+# alone: setting GOWORK on those changes what gopls resolves, for the worse.
+if [ -z "${GOWORK:-}" ] && [ ! -e "$root/go.work" ] && [ ! -e "$root/go.mod" ]; then
+  mods=()
+  while IFS= read -r m; do
+    mods+=("$(dirname "$m")")
+  done < <(find "$root" -maxdepth 6 -name go.mod \
+             -not -path '*/vendor/*' -not -path '*/node_modules/*' \
+             -not -path '*/.git/*' 2>/dev/null | sort)
+
+  if [ "${#mods[@]}" -gt 1 ]; then
+    cache="${XDG_CACHE_HOME:-$HOME/.cache}/claude-lsp"
+    mkdir -p "$cache"
+    key="$(printf '%s' "$root" | shasum -a 256 | cut -c1-12)"
+    work="$cache/go.work-$key"
+
+    # go.work's directive must be >= every module's; take the highest.
+    ver="$(grep -h '^go ' "${mods[@]/%//go.mod}" 2>/dev/null \
+             | awk '{print $2}' | sort -V | tail -1)"
+    [ -n "$ver" ] || ver=1.22
+
+    # Regenerated on every spawn -- once per session, and always current.
+    {
+      printf 'go %s\n\nuse (\n' "$ver"
+      printf '\t%s\n' "${mods[@]}"
+      printf ')\n'
+    } > "$work"
+
+    export GOWORK="$work"
+  fi
+fi
+
+exec gopls "$@"

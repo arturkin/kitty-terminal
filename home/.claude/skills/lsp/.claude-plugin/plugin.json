@@ -3,6 +3,11 @@
   "version": "1.0.0",
   "description": "Every language server this machine uses, rooted at the project and told what not to index.",
   "lspServers": {
+    "gopls": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/bin/gopls-launch",
+      "workspaceFolder": "${CLAUDE_PROJECT_DIR}",
+      "extensionToLanguage": { ".go": "go" }
+    },
     "typescript": {
       "command": "typescript-language-server",
       "args": ["--stdio"],
