@@ -15,6 +15,7 @@
       "env": { "NODE_OPTIONS": "--max-old-space-size=4096" },
       "initializationOptions": {
         "maxTsServerMemory": 4096,
+        "tsserver": { "useSyntaxServer": "never" },
         "preferences": { "includePackageJsonAutoImports": "off" }
       },
       "extensionToLanguage": {
