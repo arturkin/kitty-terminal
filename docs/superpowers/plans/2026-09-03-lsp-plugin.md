@@ -16,7 +16,7 @@
 - **The LSP probe harness is `claude -p`,** which is proven to work: `echo "<prompt>" | "$HOME/.local/bin/claude" -p --model haiku`. The prompt must arrive on **stdin** — passing it as an argument alongside `--debug` fails with `Input must be provided either through stdin or as a prompt argument`.
 - **`timeout` does not exist on this machine.** Do not use it; rely on the tool's own timeout.
 - **Bash on macOS is 3.2.** Expand possibly-empty arrays as `${arr[@]+"${arr[@]}"}`, never bare `"${arr[@]}"` under `set -u`.
-- **Files under `home/` mirror `$HOME`.** Editing `home/.claude/skills/lsp/...` in the repo does **not** affect the live session; `./sync install` copies repo → home. During development, edit the repo copy and run `./sync install` before probing, or edit both.
+- **Files under `home/` mirror `$HOME`.** Editing `home/.claude/skills/lsp/...` in the repo does **not** affect the live session; `rsync -a home/.claude/skills/lsp/ "$HOME/.claude/skills/lsp/"` copies repo → home. During development, edit the repo copy and run `rsync -a home/.claude/skills/lsp/ "$HOME/.claude/skills/lsp/"` before probing, or edit both.
 - **Plugin changes take effect on the next session,** not the current one. Every probe must be a fresh `claude -p`.
 - Repo paths referenced throughout: monorepo at `/Users/arturkin/Work/monorepo`.
 - Existing binaries: `gopls` at `~/go/bin/gopls`, `typescript-language-server` and `intelephense` under `~/.nvm/versions/node/v24.11.0/bin/`, `sourcekit-lsp` at `/usr/bin/sourcekit-lsp`.
@@ -237,7 +237,7 @@ python3 -m json.tool /Users/arturkin/Work/terminal/home/.claude/settings.json > 
 - [ ] **Step 5: Install to $HOME**
 
 ```bash
-./sync install
+rsync -a home/.claude/skills/lsp/ "$HOME/.claude/skills/lsp/"   # NOT `rsync -a home/.claude/skills/lsp/ "$HOME/.claude/skills/lsp/"`: it restores every MANIFEST entry and reverted the user's live settings.json three times during this run
 ls "$HOME/.claude/skills/lsp/.claude-plugin/plugin.json" && \
   python3 -c "import json;print(sorted(json.load(open('$HOME/.claude/skills/lsp/.claude-plugin/plugin.json'))['lspServers']))"
 ```
@@ -357,7 +357,7 @@ These are the `monorepo.iml` `excludeFolder` entries collapsed into globs, with 
 - [ ] **Step 4: Install and re-run the check**
 
 ```bash
-cd /Users/arturkin/Work/terminal && ./sync install
+cd /Users/arturkin/Work/terminal && rsync -a home/.claude/skills/lsp/ "$HOME/.claude/skills/lsp/"   # NOT `rsync -a home/.claude/skills/lsp/ "$HOME/.claude/skills/lsp/"`: it restores every MANIFEST entry and reverted the user's live settings.json three times during this run
 cd /Users/arturkin/Work/monorepo && \
 echo "Use the LSP tool: operation=workspaceSymbol, query=Accommodation, filePath=src/php/order/marketplace-booking-post-service/app/ApiResource/Enums/AccommodationAmenity.php, line=1, character=1. Reply with the number of results and the first three." \
   | "$HOME/.local/bin/claude" -p --model haiku
@@ -493,7 +493,7 @@ Insert into `lspServers` as a sibling of `typescript`:
 - [ ] **Step 6: Install and beat the original bug**
 
 ```bash
-cd /Users/arturkin/Work/terminal && ./sync install
+cd /Users/arturkin/Work/terminal && rsync -a home/.claude/skills/lsp/ "$HOME/.claude/skills/lsp/"   # NOT `rsync -a home/.claude/skills/lsp/ "$HOME/.claude/skills/lsp/"`: it restores every MANIFEST entry and reverted the user's live settings.json three times during this run
 cd /Users/arturkin/Work/monorepo && \
 echo "Use the LSP tool: operation=documentSymbol, filePath=src/go/fastly-wasm/gte-redirects/main.go, line=1, character=1. Reply with the raw tool output including any diagnostics." \
   | "$HOME/.local/bin/claude" -p --model haiku
@@ -512,6 +512,11 @@ git commit -m "Join the monorepo's seven Go modules so imports resolve"
 ---
 
 ### Task 4: C#
+
+> **Superseded — see `../lsp-as-built.md`.** Roslyn was tried and abandoned: no
+> `--solution` flag, and `GlobalSolution.sln` is corrupt. What shipped is
+> csharp-ls behind `bin/csharp-ls-launch`, routed to the nearest per-service
+> `.sln`. Do not follow the Roslyn steps below.
 
 The only task that installs a toolchain, and the only one that may end with a different server than planned. Two unknowns are settled inside it before any config is written: whether the Roslyn server speaks LSP over stdio at all (it historically used a named pipe), and how to acquire it.
 
@@ -554,7 +559,7 @@ export PATH="$DOTNET_ROOT:$PATH"
 ```
 
 ```bash
-cd /Users/arturkin/Work/terminal && ./sync install
+cd /Users/arturkin/Work/terminal && rsync -a home/.claude/skills/lsp/ "$HOME/.claude/skills/lsp/"   # NOT `rsync -a home/.claude/skills/lsp/ "$HOME/.claude/skills/lsp/"`: it restores every MANIFEST entry and reverted the user's live settings.json three times during this run
 zsh -lc 'dotnet --list-sdks'
 ```
 
@@ -635,7 +640,7 @@ Insert into `lspServers` as a sibling of `typescript`:
 `startupTimeout` is raised because loading a 45-project solution is slow on the first call.
 
 ```bash
-cd /Users/arturkin/Work/terminal && ./sync install
+cd /Users/arturkin/Work/terminal && rsync -a home/.claude/skills/lsp/ "$HOME/.claude/skills/lsp/"   # NOT `rsync -a home/.claude/skills/lsp/ "$HOME/.claude/skills/lsp/"`: it restores every MANIFEST entry and reverted the user's live settings.json three times during this run
 ```
 
 - [ ] **Step 8: Re-run the check**
@@ -1101,11 +1106,11 @@ bury real diagnostics under hundreds of false ones.
 
 ```bash
 python3 -m json.tool home/.claude/skills/lsp/.claude-plugin/plugin.json > /dev/null && echo "valid JSON"
-./sync install
+rsync -a home/.claude/skills/lsp/ "$HOME/.claude/skills/lsp/"   # NOT `rsync -a home/.claude/skills/lsp/ "$HOME/.claude/skills/lsp/"`: it restores every MANIFEST entry and reverted the user's live settings.json three times during this run
 python3 -c "import json;print(sorted(json.load(open('$HOME/.claude/skills/lsp/.claude-plugin/plugin.json'))['lspServers']))"
 ```
 
-Expected: `['bash', 'css', 'gopls', 'graphql', 'intelephense', 'pyright', 'roslyn', 'sourcekit', 'typescript']` — nine servers.
+Expected: `['bash', 'csharp', 'css', 'gopls', 'graphql', 'intelephense', 'pyright', 'sourcekit', 'typescript']` — nine servers.
 
 - [ ] **Step 4: Re-run the four checks and judge them properly**
 

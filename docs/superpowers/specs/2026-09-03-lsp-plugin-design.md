@@ -1,5 +1,12 @@
 # One plugin that owns every language server
 
+> **Superseded in part — read `../lsp-as-built.md` first.** The C# design
+> below (Roslyn, `--solution GlobalSolution.sln`), the Homebrew-cask .NET
+> install and the `kjobs` section did not survive contact: that Roslyn build has
+> no `--solution` flag, `GlobalSolution.sln` is corrupt (`MSB5023`), the cask
+> needs interactive root, and the shipped csharp-ls is a native binary with no
+> interpreter to strip. Nine servers shipped, not five.
+
 Claude Code already spawns a language server per agent, lazily, and `kjobs`
 already lists it. What it does not do is root that server anywhere useful,
 exclude anything from its index, or know what a `.cs` file is. This replaces
