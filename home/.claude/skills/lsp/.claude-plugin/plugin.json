@@ -84,11 +84,22 @@
       "args": ["--stdio"],
       "workspaceFolder": "${CLAUDE_PROJECT_DIR}",
       "settings": {
-        "scss": { "validate": true, "lint": { "unknownAtRules": "ignore" } },
         "css": { "validate": true, "lint": { "unknownAtRules": "ignore" } },
         "less": { "validate": true }
       },
-      "extensionToLanguage": { ".css": "css", ".scss": "scss", ".less": "less" }
+      "extensionToLanguage": { ".css": "css", ".less": "less" }
+    },
+    "scss": {
+      "command": "some-sass-language-server",
+      "args": ["--stdio"],
+      "workspaceFolder": "${CLAUDE_PROJECT_DIR}",
+      "settings": {
+        "somesass": {
+          "scss": { "diagnostics": { "lint": { "unknownAtRules": "ignore" } } },
+          "sass": { "diagnostics": { "lint": { "unknownAtRules": "ignore" } } }
+        }
+      },
+      "extensionToLanguage": { ".scss": "scss", ".sass": "sass" }
     },
     "graphql": {
       "command": "graphql-lsp",
