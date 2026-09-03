@@ -26,7 +26,22 @@
 
 ### Task 0: Confirm `${CLAUDE_PROJECT_DIR}` expands in `workspaceFolder`
 
-The whole rooting fix rests on this and it is unverified — substitution was only ever probed in `args`. If it does not expand, every server needs a `cd` wrapper and Tasks 1–4 change shape, so this is resolved first and alone.
+The whole rooting fix rests on this and it is unverified — substitution was only
+ever probed in `args`. If it does not expand, every server needs a `cd` wrapper
+and Tasks 1-4 change shape, so this is resolved first and alone.
+
+**A first attempt at this task returned a false negative.** It gave the probe
+server `".go"`, which `gopls-lsp@claude-plugins-official` — still enabled at this
+point in the plan — also claims. Both runs were answered by the official server,
+so they were byte-identical no matter what `workspaceFolder` said. Two rules
+follow, and they are what make this version valid:
+
+- **Claim an extension no enabled plugin claims.** `.rs` is free and proven free
+  (`No LSP server available for file type: .rs`). `.go`, `.ts`, `.php` and
+  `.swift` are all taken until Task 1 runs.
+- **Do not infer from the tool's answer.** Capture the LSP `initialize` request
+  itself, which carries `rootUri` / `workspaceFolders` verbatim. That is the only
+  direct evidence of what the client sent.
 
 **Files:**
 - Create: `/private/tmp/claude-501/-Users-arturkin-Work-terminal/adb07d5a-d03b-4446-b709-fe2422f3faa0/scratchpad/wsprobe/` (throwaway, never committed)
@@ -35,51 +50,79 @@ The whole rooting fix rests on this and it is unverified — substitution was on
 - Consumes: nothing.
 - Produces: a yes/no answer recorded in the plan's Task 1 notes. No code.
 
-- [ ] **Step 1: Build a two-module scratch project**
+- [ ] **Step 1: Build the scratch project and a stdin-capturing wrapper**
 
 ```bash
 S=/private/tmp/claude-501/-Users-arturkin-Work-terminal/adb07d5a-d03b-4446-b709-fe2422f3faa0/scratchpad/wsprobe
 rm -rf "$S"; mkdir -p "$S/inner"
-printf 'module inner\n\ngo 1.22\n' > "$S/inner/go.mod"
-printf 'package inner\n\nfunc Beta() int { return 2 }\n' > "$S/inner/lib.go"
+printf 'fn alpha() -> i32 { 1 }\n' > "$S/inner/lib.rs"
+cat > "$S/capture.sh" <<'EOF'
+#!/usr/bin/env bash
+# Tee the client's LSP traffic to a log, then hand it to a real server so the
+# handshake completes. Only the initialize request matters.
+exec tee -a "$(dirname "$0")/initialize.log" | /Users/arturkin/go/bin/gopls "$@"
+EOF
+chmod +x "$S/capture.sh"
 ```
 
-- [ ] **Step 2: Install a probe plugin whose workspaceFolder uses the variable**
+- [ ] **Step 2: Install a probe plugin claiming `.rs`, rooted via the variable**
 
 ```bash
 S=/private/tmp/claude-501/-Users-arturkin-Work-terminal/adb07d5a-d03b-4446-b709-fe2422f3faa0/scratchpad/wsprobe
 P="$HOME/.claude/skills/zz-ws-probe"; rm -rf "$P"; mkdir -p "$P/.claude-plugin"
-cat > "$P/.claude-plugin/plugin.json" <<'EOF'
+cat > "$P/.claude-plugin/plugin.json" <<EOF
 {
   "name": "zz-ws-probe",
   "version": "1.0.0",
-  "description": "probe: does workspaceFolder expand ${CLAUDE_PROJECT_DIR}",
+  "description": "probe: does workspaceFolder expand CLAUDE_PROJECT_DIR",
   "lspServers": {
-    "gopls-ws-probe": {
-      "command": "/Users/arturkin/go/bin/gopls",
-      "workspaceFolder": "${CLAUDE_PROJECT_DIR}/inner",
-      "extensionToLanguage": { ".go": "go" }
+    "wsprobe": {
+      "command": "$S/capture.sh",
+      "workspaceFolder": "\${CLAUDE_PROJECT_DIR}/inner",
+      "extensionToLanguage": { ".rs": "rust" }
     }
   }
 }
 EOF
+python3 -m json.tool "$P/.claude-plugin/plugin.json" > /dev/null && echo "valid JSON"
+grep -o '"workspaceFolder": "[^"]*"' "$P/.claude-plugin/plugin.json"
 ```
 
-- [ ] **Step 3: Run the probe from the project root and capture the answer**
+The `grep` must print `"workspaceFolder": "${CLAUDE_PROJECT_DIR}/inner"` with the
+variable **unexpanded** — the heredoc escaping is the easiest thing to get wrong
+here, and expanding it locally would invalidate the probe.
+
+- [ ] **Step 3: Run one session and read the initialize request**
 
 ```bash
 S=/private/tmp/claude-501/-Users-arturkin-Work-terminal/adb07d5a-d03b-4446-b709-fe2422f3faa0/scratchpad/wsprobe
-cd "$S" && echo "Use the LSP tool: operation=documentSymbol, filePath=inner/lib.go, line=3, character=6. Reply with the raw tool output only." \
+rm -f "$S/initialize.log"
+cd "$S" && echo "Use the LSP tool: operation=documentSymbol, filePath=inner/lib.rs, line=1, character=4. Reply with one word: done." \
   | "$HOME/.local/bin/claude" -p --model haiku
-for p in $(pgrep -f 'gopls'); do lsof -a -p "$p" -d cwd -Fn 2>/dev/null | tail -1; done
+echo "=== captured initialize ==="
+head -c 4000 "$S/initialize.log" | tr ',' '\n' | grep -iE 'rootUri|rootPath|workspaceFolders|uri' | head -20
 ```
 
-Expected if substitution works: `Beta` is returned with **no** "not included in your workspace" warning, because the server is rooted at the real `inner/` directory.
-Expected if it does not: a "not included in your workspace" warning or a server start failure, because the root is the literal string `${CLAUDE_PROJECT_DIR}/inner`.
+Read the captured values and classify — this is the whole answer:
 
-- [ ] **Step 4: Cross-check against a deliberately wrong literal root**
+| What `rootUri`/`workspaceFolders` contains | Verdict |
+|---|---|
+| `file:///…/scratchpad/wsprobe/inner` | **expands and is honoured** |
+| literal `${CLAUDE_PROJECT_DIR}` text | does not expand |
+| `file:///…/scratchpad/wsprobe` (no `/inner`) | expands nowhere — field ignored |
+| log empty / no server spawned | probe failed; do not conclude — see Step 4 |
 
-Replace `"workspaceFolder": "${CLAUDE_PROJECT_DIR}/inner"` with `"workspaceFolder": "/nonexistent/xyz"`, re-run Step 3, and confirm the output differs from Step 3's. Identical output in both runs means `workspaceFolder` is being ignored entirely — treat that as "does not work".
+- [ ] **Step 4: Prove the probe server actually ran**
+
+```bash
+S=/private/tmp/claude-501/-Users-arturkin-Work-terminal/adb07d5a-d03b-4446-b709-fe2422f3faa0/scratchpad/wsprobe
+test -s "$S/initialize.log" && echo "PROBE SERVER RAN ($(wc -c < "$S/initialize.log") bytes)" || echo "PROBE SERVER NEVER RAN - result is INCONCLUSIVE"
+```
+
+An empty or missing log means the probe server was never spawned and **no
+conclusion may be drawn** — report `BLOCKED` with the log state rather than
+guessing. This step exists because the previous attempt drew a confident
+conclusion from a server that was never consulted.
 
 - [ ] **Step 5: Remove the probe**
 
@@ -90,22 +133,24 @@ ls "$HOME/.claude/skills/" | grep zz-ws-probe && echo "STILL PRESENT - remove it
 
 - [ ] **Step 6: Record the outcome in the plan and commit**
 
-Edit this file: under Task 1, replace the line `**Task 0 outcome:** _not yet run._` with either
-`**Task 0 outcome:** \`workspaceFolder\` expands \`${CLAUDE_PROJECT_DIR}\`.` or
-`**Task 0 outcome:** \`workspaceFolder\` does NOT expand; every server gets a \`cd\` wrapper (see Task 3's \`gopls-launch\` for the pattern).`
+Edit this file: under Task 1, replace the whole `**Task 0 outcome:**` line with
+exactly one of:
+
+- `**Task 0 outcome:** \`workspaceFolder\` expands \`${CLAUDE_PROJECT_DIR}\`; keep it on all five servers.`
+- `**Task 0 outcome:** \`workspaceFolder\` does NOT expand; every server gets a \`cd\` wrapper (see Task 3's \`gopls-launch\` for the pattern).`
+- `**Task 0 outcome:** \`workspaceFolder\` is ignored entirely; drop the field and root every server with a \`cd\` wrapper.`
 
 ```bash
 git add docs/superpowers/plans/2026-09-03-lsp-plugin.md
-git commit -m "Record whether workspaceFolder expands CLAUDE_PROJECT_DIR"
+git commit -m "Record what workspaceFolder does with CLAUDE_PROJECT_DIR"
 ```
 
----
 
 ### Task 1: The plugin, with TypeScript and Swift
 
 The two servers that need no wrapper, so this task proves the delivery mechanism — plugin loads, takes over from the official plugins, nothing double-claims an extension.
 
-**Task 0 outcome:** `workspaceFolder` does NOT expand; every server gets a `cd` wrapper (see Task 3's `gopls-launch` for the pattern).
+**Task 0 outcome:** _not yet run (first attempt invalidated -- see Task 0)._
 
 **Files:**
 - Create: `home/.claude/skills/lsp/.claude-plugin/plugin.json`
