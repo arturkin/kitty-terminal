@@ -102,8 +102,7 @@
       "extensionToLanguage": { ".scss": "scss", ".sass": "sass" }
     },
     "graphql": {
-      "command": "graphql-lsp",
-      "args": ["server", "--method", "stream"],
+      "command": "${CLAUDE_PLUGIN_ROOT}/bin/graphql-launch",
       "workspaceFolder": "${CLAUDE_PROJECT_DIR}",
       "extensionToLanguage": { ".graphql": "graphql", ".gql": "graphql" }
     },

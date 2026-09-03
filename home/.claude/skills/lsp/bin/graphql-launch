@@ -1,0 +1,195 @@
+#!/usr/bin/env bash
+# graphql-lsp, rooted at the directory that owns the project's graphql config.
+# graphql-config discovers the schema by walking up from the server's rootDir,
+# so a session started at a monorepo root never sees a config that lives in a
+# subdirectory and every request comes back null. This finds the config first
+# (up, then a shallow walk down) and runs the server from there.
+#
+# It also repairs configs graphql-config itself cannot load, into a generated
+# copy outside the repo -- the same trick as gopls-launch's go.work and for the
+# same reason: a company checkout has to stay clean. Three defects show up in
+# practice, and all three fail identically and silently (every response null,
+# no error anywhere): a config named `.graphql.config.yml`, which is not one of
+# cosmiconfig's search places; `schema:` pointers naming files that are not
+# there; and an SDL file that fails validation, which makes every request fail
+# rather than just the schema load.
+set -euo pipefail
+export PATH="$PATH:/opt/homebrew/bin:/usr/local/bin"
+
+# Canonicalised: the upward walk below compares against git's (physical)
+# toplevel, and a relative root would never match it -- dirname bottoms out
+# at "." and the walk spins.
+root="$(cd "${CLAUDE_PROJECT_DIR:-$PWD}" 2>/dev/null && pwd -P \
+        || printf '%s' "${CLAUDE_PROJECT_DIR:-$PWD}")"
+[ -d "$root" ] || root="$PWD"
+
+# Every cosmiconfig search place graphql-config uses, plus `.graphql.config.*`,
+# which it does not (its places are `graphql.config.*`, so the leading dot
+# silently disables the file). package.json is deliberately not a locator: it
+# would match in every JS directory in the tree.
+name_globs=( -name 'graphql.config.*' -o -name '.graphqlrc' -o -name '.graphqlrc.*' \
+             -o -name '.graphqlconfig' -o -name '.graphqlconfig.*' -o -name '.graphql.config.*' )
+
+# Bound the upward walk at the git toplevel; guarded because a non-repo root
+# would otherwise kill the wrapper under -e.
+git_top="$(cd "$root" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null || true)"
+[ -n "$git_top" ] || git_top="/"
+
+config=""
+dir="$root"
+while :; do
+  config="$(find "$dir" -maxdepth 1 \( "${name_globs[@]}" \) 2>/dev/null | sort | head -n1 || true)"
+  [ -n "$config" ] && break
+  [ "$dir" = "$git_top" ] && break
+  [ "$dir" = "/" ] && break
+  dir="$(dirname "$dir")"
+done
+
+# Nothing above: look a little way below, shallowest first. Bounded hard --
+# this runs on every server spawn and the tree it runs over is a monorepo.
+if [ -z "$config" ]; then
+  config="$(find "$root" -maxdepth 4 \( -name node_modules -o -name .git -o -name vendor \) -prune \
+              -o -type f \( "${name_globs[@]}" \) -print 2>/dev/null \
+            | awk '{ n = gsub("/", "/"); print n "\t" $0 }' | sort -n | head -n1 | cut -f2- || true)"
+fi
+
+# No config anywhere: still serve the file, syntax only.
+if [ -z "$config" ]; then
+  exec graphql-lsp server --method stream
+fi
+
+config_dir="$(cd "$(dirname "$config")" && pwd -P)"
+cd "$config_dir"
+
+# bash 3.2 mis-parses a heredoc inside $(...), so the helper is read into a
+# variable first and handed to node -e.
+read -r -d '' repair_js <<'NODE' || true
+'use strict';
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const crypto = require('crypto');
+
+const cfgDir = process.env.GQL_CONFIG_DIR;
+const bin = process.env.GQL_BIN;
+if (!cfgDir || !bin) process.exit(0);
+
+// graphql-lsp is installed globally, so its deps are not on this script's
+// require path; reach them through the bin symlink's real location.
+const nm = path.join(path.dirname(path.dirname(fs.realpathSync(bin))), 'node_modules');
+const g = require(path.join(nm, 'graphql'));
+const yaml = require(path.join(nm, 'js-yaml'));
+const { loadConfigSync } = require(path.join(nm, 'graphql-config'));
+
+// Building every project's schema is the only honest test: a config can load
+// and still resolve to nothing usable.
+try {
+  const cfg = loadConfigSync({ rootDir: cfgDir, throwOnMissing: true, throwOnEmpty: true });
+  for (const p of Object.values(cfg.projects)) p.getSchemaSync();
+  process.exit(0);
+} catch {}
+
+const NAMES = ['graphql.config.yml', 'graphql.config.yaml', 'graphql.config.json',
+  '.graphqlrc', '.graphqlrc.yml', '.graphqlrc.yaml', '.graphqlrc.json',
+  '.graphql.config.yml', '.graphql.config.yaml', '.graphql.config.json',
+  '.graphqlconfig', '.graphqlconfig.yml', '.graphqlconfig.yaml', '.graphqlconfig.json'];
+
+let raw = null;
+for (const n of NAMES) {
+  const f = path.join(cfgDir, n);
+  if (!fs.existsSync(f)) continue;
+  try { raw = yaml.load(fs.readFileSync(f, 'utf8')); } catch {}
+  if (raw) break;
+}
+if (!raw || typeof raw !== 'object') process.exit(0);
+
+const pointers = [];
+const push = s => {
+  if (typeof s === 'string') pointers.push(s);
+  else if (s && typeof s === 'object') pointers.push.apply(pointers, Object.keys(s));
+};
+if (Array.isArray(raw.schema)) raw.schema.forEach(push); else push(raw.schema);
+
+const isFile = p => { try { return fs.statSync(p).isFile(); } catch { return false; } };
+let files = pointers.map(p => path.resolve(cfgDir, p)).filter(isFile);
+
+// Pointers naming files that are not there leave nothing to load. Fall back to
+// SDL sitting next to the config: a .graphql file carrying a large number of
+// type definitions is a schema and nothing else.
+if (files.length === 0) {
+  for (const f of fs.readdirSync(cfgDir)) {
+    if (!/\.(graphql|graphqls|gql|sdl)$/.test(f)) continue;
+    const full = path.join(cfgDir, f);
+    try {
+      const ast = g.parse(fs.readFileSync(full, 'utf8'));
+      if (ast.definitions.filter(d => /TypeDefinition$/.test(d.kind)).length >= 10) files.push(full);
+    } catch {}
+  }
+}
+if (files.length === 0) process.exit(0);
+files.sort();
+
+const cacheRoot = path.join(process.env.XDG_CACHE_HOME || path.join(os.homedir(), '.cache'), 'claude-lsp');
+const outDir = path.join(cacheRoot, 'graphql-' + crypto.createHash('sha256').update(cfgDir).digest('hex').slice(0, 12));
+const schemaOut = path.join(outDir, 'schema.graphql');
+const stampFile = path.join(outDir, 'stamp');
+const stamp = [cfgDir].concat(files.map(f => {
+  const s = fs.statSync(f);
+  return f + ':' + s.size + ':' + s.mtimeMs;
+})).join('|');
+
+// Reparsing half a megabyte of SDL on every spawn is wasted work when nothing
+// has moved; the stamp makes the steady state one stat per schema file.
+let cached = false;
+try { cached = fs.readFileSync(stampFile, 'utf8') === stamp && fs.statSync(schemaOut).isFile(); } catch {}
+
+if (!cached) {
+  let doc;
+  try { doc = g.parse(files.map(f => fs.readFileSync(f, 'utf8')).join('\n')); } catch { process.exit(0); }
+
+  // A single duplicated field is enough to fail SDL validation, and that
+  // failure takes down every request, not just the definition carrying it.
+  const seenType = new Set();
+  const definitions = [];
+  for (const d of doc.definitions) {
+    if (d.name && /TypeDefinition$/.test(d.kind)) {
+      const k = d.kind + ':' + d.name.value;
+      if (seenType.has(k)) continue;
+      seenType.add(k);
+    }
+    ['fields', 'values'].forEach(key => {
+      if (!d[key]) return;
+      const seen = new Set();
+      d[key] = d[key].filter(m => (seen.has(m.name.value) ? false : (seen.add(m.name.value), true)));
+    });
+    definitions.push(d);
+  }
+  const repaired = Object.assign({}, doc, { definitions: definitions });
+  try { g.buildASTSchema(repaired); } catch { process.exit(0); }
+
+  const documents = (Array.isArray(raw.documents) ? raw.documents : raw.documents ? [raw.documents] : [])
+    .filter(d => typeof d === 'string')
+    .map(d => (path.isAbsolute(d) ? d : path.join(cfgDir, d)));
+
+  fs.mkdirSync(outDir, { recursive: true });
+  fs.writeFileSync(schemaOut, g.print(repaired));
+  fs.writeFileSync(path.join(outDir, 'graphql.config.json'),
+    JSON.stringify(documents.length ? { schema: schemaOut, documents: documents } : { schema: schemaOut }, null, 2));
+  fs.writeFileSync(stampFile, stamp);
+}
+
+process.stdout.write(outDir);
+NODE
+
+# Prints a generated config directory when the project's own config cannot be
+# loaded and a usable one could be built, and nothing at all otherwise -- so
+# any failure in there degrades to the plain server instead of taking the
+# language server down with it.
+generated="$(GQL_CONFIG_DIR="$config_dir" GQL_BIN="$(command -v graphql-lsp || true)" \
+             node -e "$repair_js" 2>/dev/null || true)"
+
+if [ -n "$generated" ] && [ -d "$generated" ]; then
+  exec graphql-lsp server --method stream --configDir "$generated"
+fi
+
+exec graphql-lsp server --method stream
