@@ -1,0 +1,26 @@
+# lazygit, bound to F3 in kitty.conf.
+#
+# Only settings that differ from lazygit's defaults live here, so upgrades keep
+# bringing new defaults with them. lazygit rewrites this file when it migrates
+# a renamed key, so expect it to reformat itself occasionally.
+#
+# Deliberately NOT set: nerdFontsVersion. font_family is Monaco, which has no
+# Nerd glyphs -- asking for them renders tofu boxes instead of icons.
+
+gui:
+  # Catppuccin Mocha, matching the color0-15 block in kitty.conf. lazygit's
+  # defaults are the eight ANSI names, which clash with that palette.
+  theme:
+    activeBorderColor: ["#89b4fa", "bold"]
+    inactiveBorderColor: ["#585b70"]
+    selectedLineBgColor: ["#313244"]
+  # The command log teaches you the git behind each keypress, then becomes
+  # noise. The bottom line stays: it is where the keybindings are.
+  showCommandLog: false
+
+git:
+  # delta is already installed and used for git itself, so diffs look the same
+  # here as in `git diff` and kdiff. --paging=never because lazygit scrolls.
+  diffRenderers:
+    - colorArg: always
+      command: delta --dark --paging=never

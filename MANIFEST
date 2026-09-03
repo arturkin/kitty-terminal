@@ -19,6 +19,9 @@
 # --- workmux -------------------------------------------------------------
 .config/workmux/config.yaml
 
+# --- lazygit (F3 in kitty) -----------------------------------------------
+.config/lazygit/
+
 # --- Claude Code ---------------------------------------------------------
 # Config only. Runtime state (history.jsonl, projects/, sessions/,
 # .credentials.json, caches, logs) is deliberately absent.
