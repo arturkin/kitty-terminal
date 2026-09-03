@@ -22,8 +22,8 @@ One plugin, `~/.claude/skills/lsp/.claude-plugin/plugin.json`, auto-loading as
 | `sourcekit` | `/usr/bin/sourcekit-lsp` | .swift | working, **after a build** |
 | `csharp` | `bin/csharp-ls-launch` | .cs | working when rooted at a service |
 | `css` | `vscode-css-language-server` | .css .less | working, single-file |
-| `scss` | `some-sass-language-server` | .scss .sass | working, cross-file |
-| `graphql` | `bin/graphql-launch` | .graphql .gql | working from any root |
+| `scss` | `bin/lsp-settle` → `some-sass-language-server` | .scss .sass | working, cross-file |
+| `graphql` | `bin/lsp-settle` → `bin/graphql-launch` | .graphql .gql | working from any root |
 | `pyright` | `pyright-langserver` | .py .pyi | working |
 | `bash` | `bash-language-server` | .sh .bash | working (not this repo — see below) |
 
@@ -38,7 +38,7 @@ more servers showed delta-zero. Cost is one server per *(session × language
 actually touched)* — so four agents editing TypeScript means four tsservers,
 which is why that entry carries `--max-old-space-size=4096`.
 
-## The three things most likely to waste an hour
+## The four things most likely to waste an hour
 
 **1. `lspServers` is a plugin-manifest field, not a settings field.** Put it in
 `settings.json` or pass it via `--settings` and it is silently ignored — no
@@ -55,7 +55,15 @@ tested by trying to move intelephense's index out of `/tmp`; it created
 `$HOME` path has to go through a wrapper script, which is what the three
 wrappers in `bin/` are for.
 
-**3. A wrong answer is the real failure mode, not an empty one.** Every trap in
+**3. Claude Code sends the request immediately after `didOpen`.** There is no
+settle time. A server that indexes asynchronously and answers an unindexed
+question with an empty result — rather than waiting — therefore reports "no
+definition" on the first call of every session. `some-sass` and `graphql-lsp`
+both do this; neither has a setting to change it. This is invisible to raw
+probing, because any hand-written client naturally waits between `didOpen` and
+the request. Both entries now run behind `bin/lsp-settle`.
+
+**4. A wrong answer is the real failure mode, not an empty one.** Every trap in
 this project looked like success: `documentSymbol` returning a full tree with no
 project loaded, a hover returning `any` instead of the true type, C# answering
 zero symbols instead of erroring, GraphQL returning `null` for three unrelated
@@ -79,6 +87,30 @@ reason to ask twice.
 
 Found only by the `claude -p` integration run — the raw probes all used a
 generous settle time and never saw it.
+
+## lsp-settle: holding the first request
+
+`bin/lsp-settle <ms> <command> [args…]` holds the first `textDocument/*`
+request of a session by `<ms>` and pipes everything else through untouched.
+Measured thresholds: about 100ms for `some-sass`, under 400ms for
+`graphql-lsp`; both entries use 500. The cost is paid once per server per
+session.
+
+Two details in there were each good for an hour, and both are the kind that
+look like the server's fault:
+
+- **The delay must be measured from the request's arrival, not from spawn.**
+  Measured from spawn, startup latency eats the whole budget and the hold
+  silently becomes a no-op — a 3000ms setting produced a 0ms delay.
+- **Responses must bypass the hold queue.** Serialising all client→server
+  traffic behind the held request also holds the client's *reply* to the
+  server's own `workspace/configuration` request — which is exactly what
+  graphql-lsp waits on before loading a schema. The delay then guarantees the
+  failure it was added to prevent: graphql stayed empty at a 10-second hold and
+  worked at 400ms once responses were allowed through.
+
+Verified with a control that still misses, and a TypeScript regression check
+confirming the proxy does not disturb a server that never had the problem.
 
 ## Why C# is not what the spec says
 
@@ -281,6 +313,9 @@ also needs the per-repo `buildServer.json` and one build, per the Swift section.
   committed** — that file also holds unrelated in-flight edits, so it is the
   user's to split and commit.
 - The four monorepo defects below are all worth fixing at source.
+- `lsp-settle`'s 500ms is a margin over measured thresholds, not a tuned value.
+  If a server is ever added that needs longer, the symptom will be a
+  first-call-only empty result.
 
 ## Four monorepo bugs found by this work
 

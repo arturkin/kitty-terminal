@@ -79,7 +79,15 @@ them, and what is left.
 | 5 | Canonicalise the wrapper roots | Done, and it was a live bug, not a theoretical one: 1945 spin iterations in 10s |
 | 6 | Drop `startupTimeout` from `csharp` | Done |
 
-Two findings arrived that were not on the list:
+Three findings arrived that were not on the list:
+
+- **SCSS and GraphQL were still broken through Claude Code** after passing every
+  raw probe. Claude Code sends `didOpen` and the request back to back; both
+  servers answer an unindexed question with an empty result. `bin/lsp-settle`
+  holds the first request by 500ms. This is the clearest example in the whole
+  project of why raw probing is not verification: a hand-written client waits
+  naturally, so the bug cannot appear there.
+
 
 - **TypeScript answered `any`.** `typescript-language-server`'s syntax server
   replies before the semantic one and gives a confidently wrong type on a cold
