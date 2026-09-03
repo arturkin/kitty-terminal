@@ -53,8 +53,9 @@ for and nothing that can end up inconsistent — and it re-flows correctly when 
 | `⌃⇧G` / `⌃⇧H` | last command's output / full scrollback, in a pager |
 | `⌃⇧Z` / `⌃⇧X` | jump to the previous / next **prompt** in this pane |
 | `⌘⇧R` | reload config |
-| `F1` or `⌥/` | **cheat sheet** — every shortcut and command, as an overlay |
-| `F2` | **what is running** — every pane's jobs; kill them or jump to one |
+| `F1` or `⌥/` | **cheat sheet** — every shortcut and command; press again to close |
+| `F2` | **what is running** — every command in every pane; press again to close |
+| `F3` | **git** — lazygit over this pane, rooted where the pane is |
 
 `⌘K` on its own would clear the scrollback and leave the visible screen alone,
 so it looks like nothing happened. Terminal.app wipes both, so here it is
@@ -167,52 +168,110 @@ anywhere); the file tree and `?`-listed jumps are what replace it.
 
 Untracked files are not shown — `git diff` does not see them.
 
-## What is running
+## Doing something about it
 
-`F2`, or `kjobs` in a shell. Every command running in every pane of this kitty,
-what it is costing, and a way to kill it:
+`F3` opens [lazygit](https://github.com/jesseduffield/lazygit) as an overlay
+over the current pane, rooted in that pane's directory. `kdiff` reads a change
+set; this is the half that acts on one — stage, branch, fetch, pull, push,
+rebase, stash, reflog, and hunk-level staging, which is the part of an IDE's git
+panel that actually gets used.
 
 ```
- Running (1)  ·  11% cpu  ·  2.3G              2 agents  ·  sort: tab
+space           stage / unstage the selected file
+enter           drill into a file, then space stages one hunk or line
+a               stage everything
+c               commit          n   new branch (in Branches)
+f / p / P       fetch / pull / push
+r               rebase onto the selected branch      s   stash
+o               open a PR for this branch (uses gh)
+q               close
+```
+
+`?` lists every key in context. A second `F3` does nothing on purpose: it is
+unmapped while lazygit has focus, so the key reaches lazygit rather than
+stacking a second overlay — and it is a no-op rather than a kill, which matters
+in the middle of a rebase.
+
+Two deliberate config choices in `~/.config/lazygit/config.yml`: diffs render
+through `delta`, so they look the same here as in `git diff` and `kdiff`; and
+Nerd Font icons are **off**, because `font_family` is Monaco and asking for
+glyphs it does not have renders tofu boxes. Everything else is left at
+lazygit's defaults, so upgrades keep bringing new ones — note that lazygit
+rewrites the file in place when it renames a setting.
+
+## What is running
+
+`F2`, or `kjobs` in a shell. Every command running in every pane of this kitty
+— not just the one you started, but everything running underneath it — what it
+is costing, and a way to kill it:
+
+```
+ Running (10)  ·  21% cpu  ·  2.3G             2 agents  ·  sort: tab
 
   yarn dev · pane 1   ▾ yarn dev                  43m     ·   893M  ~/…/js/web
                         └ nodemon.js              43m     ·    13M  ~/…/js/web
                           └ node --max_old_spa…   43m   10%   865M  ~/…/js/web
-  main · pane 1       ▸ claude ✳ Ancient otter…    1d   10%   1.3G  ~/…/ab-car-widget
-  main · pane 2       ▸ claude ✳ Export and re…   23h  2.4%   190M  ~/Work/terminal
+  main · pane 1       ▾ claude ✳ Ancient otter…    1d   10%   1.3G  ~/…/ab-car-widget
+                        └ npm exec chrome-devt…    1d     ·     7M  ~/…/ab-car-widget
+                          └ chrome-devtools-mcp    1d     ·    22M  ~/…/ab-car-widget
+                        └ caffeinate -i -t 300     1m     ·     1M  ~/…/ab-car-widget
+  main · pane 2       ▾ claude ✳ Export and re…   23h  2.4%   190M  ~/Work/terminal
+                        └ sh ./run_main.sh        24m     ·   800K  ~/Work/terminal
+                          └ python http_run.py…   10m  1.7%    27M  ~/Work/terminal
+                        └ tail -f -n 0 main-ru…   19m     ·   368K  ~/Work/terminal
+                        └ intelephense --stdio    47m     ·    43M  ~/Work/terminal
 ```
 
-`j`/`k` move, `space` marks, `tab` opens a row's children, `s` cycles the sort,
-`x` sends **SIGTERM**, `X` sends **SIGKILL**, `↵` focuses the pane that row came
-from and closes the overlay, `r` refreshes (it also refreshes itself every 2s),
-`q` closes. A single row is signalled without a prompt — you opened a kill list
-on purpose — while killing several marked rows asks once and names them, because
-marks survive a cancel.
+`j`/`k` move, `space` marks, `tab` folds a row's children away, `s` cycles the
+sort, `x` sends **SIGTERM**, `X` sends **SIGKILL**, `↵` focuses the pane it came
+from and closes the overlay, `r` refreshes (it refreshes itself every 2s too),
+`q` or a second `F2` closes. A single row is signalled without a prompt — you
+opened a kill list on purpose — while killing several marked rows asks once and
+names them, because marks survive a cancel.
 
-Rows are the command you typed, not the process tree under it. A pane running
-Claude Code holds five processes — the agent, two MCP servers, a language
-server, a `caffeinate` — and this shows one row: `claude`. It gets there by
-walking down from the pane's child treating shells as transparent (kitty starts
-panes as `login … kitten run-shell --shell /bin/zsh`, so those are plumbing too)
-and stopping at the first real command. `node /Users/…/v24.11.0/bin/yarn dev` is
-displayed as what you actually ran, `yarn dev`.
+**`F2` is a toggle**, and so is `F1`. `map f2` is a kitty-level binding, so it
+fires before the overlay ever sees the key — press it twice and you used to get
+two lists stacked on each other, each needing its own `q`. `kitty.conf` now
+unmaps the key while the overlay is focused (`map --when-focus-on
+title:^Running$ f2`), so the second press reaches `kjobs`, which closes on it.
+The cheat sheet already closed on any key and needed nothing but the unmap.
 
-**CPU and memory cover the whole subtree**, because that is what a kill takes
-down: the `claude` row counts the agent plus its MCP servers and language
-server. CPU is measured as a delta between refreshes rather than `ps`'s
-lifetime average, so it reflects the last two seconds — the first frame drawn
-still shows the average, and `·` means under half a percent.
+**Every row is a real command, and every real command gets a row.** A top-level
+row is what you typed in that pane; nested under it is everything that command
+has running — a Claude Code pane shows the agent, its MCP servers, its language
+server, its `caffeinate`, and each shell command the agent has going right now.
+The list opens with all of it visible; `tab` folds a row away when you want less.
+
+Two kinds of process are walked through rather than listed. One is the pane's
+own plumbing: kitty starts panes as `login … kitten run-shell --shell /bin/zsh`,
+and an idle shell is not a job. The other is a `shell -c …` standing in front of
+the command it was given — Claude Code runs every Bash tool call as one, so
+without this the tree would be a wall of `zsh -c source snapshot-….sh …` with
+the command you care about hidden one level under each. A shell handed a script
+(`sh ./run_main.sh`) is a command in its own right and stays. Interpreters are
+stripped the same way: `node /Users/…/v24.11.0/bin/yarn dev` is displayed as
+what you actually ran, `yarn dev`.
+
+**CPU and memory on a top-level row cover the whole subtree**, because that is
+what a kill takes down: the `claude` row counts the agent plus its MCP servers
+and language server — including the wrapper shells that were too dull to list.
+A nested row counts only itself and what is under it. CPU is measured as a delta
+between refreshes rather than `ps`'s lifetime average, so it reflects the last
+two seconds — the first frame drawn still shows the average, and `·` means under
+half a percent.
 
 **Agent rows carry their session name** from the pane title, so four panes
 running Claude Code are told apart by what they are working on rather than by
-their directory. They are dimmed, sorted last in the default order, and left
-out of both the header count and the tab bar's marker.
+their directory. They are dimmed, sorted last in the default order, and the
+agent row itself is left out of both the header count and the tab bar's marker —
+what an agent is running still counts, since that is the part you did not
+already know about.
 
-`tab` opens a row to show what is under it, which is how you find out that the
-865M in a `yarn dev` row is one `node` child, or which MCP server an agent is
-leaking. **Killing one of those children signals only that process**: children
-share their job's process group, so signalling the group there would take the
-whole job down with it.
+`tab` folds a row's children away when a busy agent is burying everything else,
+and opens it again. Folds are remembered across refreshes; anything that starts
+while the list is open arrives expanded. **Killing one of those children signals
+only that process**: children share their job's process group, so signalling the
+group there would take the whole job down with it.
 
 Killing a job, by contrast, signals its **process group**, so `yarn dev` takes
 its children with it. If that group turns out to be the pane's own shell group,
@@ -234,12 +293,117 @@ finds what you backgrounded with `&`, which kitty itself cannot see (it reports
 only a pane's foreground process group, and a tab bar redraw cannot afford a
 `ps`). So a forgotten `sleep 300 &` shows up under F2 with no marker on its tab.
 
-Overlays — pagers, `kdiff`, the F2 list itself — are not panes and hold no jobs,
-so they never appear as rows. One kitty instance is one list: `listen_on` is per
-kitty PID, so a second kitty app has its own.
+Overlays — pagers, `kdiff`, the cheat sheet — are listed under the pane they are
+stacked on, because they are running something too. The F2 list is the exception:
+it leaves itself and its own shell out. kitty does not report which window of a
+pane is the base one (it reorders them as they are focused), so nothing here
+tries to guess — every window of a pane is walked, and they share its number.
+
+One kitty instance is one list: `listen_on` is per kitty PID, so a second kitty
+app has its own.
 
 `kjobs --json` prints the same rows, children included, for scripts and for
 checking the classifier without reading a curses screen.
+
+## Language servers
+
+Every language server this machine uses is defined in one file:
+`~/.claude/skills/lsp/.claude-plugin/plugin.json`. It auto-loads as a plugin
+(`lsp@skills-dir`) with no marketplace entry and no `enabledPlugins` line —
+`MANIFEST` already mirrors `.claude/skills/`, so it is backed up with
+everything else without a separate entry.
+
+Ten servers, each owning a disjoint set of extensions: `typescript` (`.ts`,
+`.tsx`, `.js`, `.jsx`, `.mts`, `.cts`, `.mjs`, `.cjs`), `gopls` (`.go`),
+`intelephense` (`.php`), `sourcekit` (`.swift`), `csharp` (`.cs`), `css`
+(`.css`, `.less`), `scss` (`.scss`, `.sass`), `graphql` (`.graphql`, `.gql`),
+`pyright` (`.py`, `.pyi`) and `bash` (`.sh`, `.bash`). The official `*-lsp`
+plugins are switched off in `enabledPlugins` — two plugins both claiming
+`.ts` was never tested, and one file listing every server beats five. A
+duplicate extension claim fails silently, so it is worth re-checking that
+they stay disjoint after any edit.
+
+**`lspServers` only works from a plugin manifest.** Put the same block in
+`settings.json`, or hand it to `--settings`, and it is silently ignored — no
+error, the server just never registers. This is the single most
+time-wasting thing to rediscover later.
+
+**Only `${CLAUDE_PROJECT_DIR}` and `${CLAUDE_PLUGIN_ROOT}` expand.** Nothing
+else does. `${HOME}` in a config value is passed through verbatim, and the
+server then creates a directory *literally called* `${HOME}` next to whatever
+it is working on. That is why `intelephense` still indexes to
+`/tmp/intelephense`, and why anything needing a real `$HOME` path goes through
+a wrapper script in `bin/` instead.
+
+**Servers spawn lazily and die with their session.** A session in the
+monorepo that made no LSP call spawned zero servers — confirmed. Cost is one
+server per (session × language actually touched), which cuts both ways: four
+agents all editing TypeScript means four `tsserver`s, which is why the
+`typescript` entry carries `--max-old-space-size=4096`.
+
+Every server gets `workspaceFolder: "${CLAUDE_PROJECT_DIR}"`, so it roots at
+the project rather than whichever pane the agent happened to start in.
+Before this, a Go file opened from another repo's pane came back with every
+import broken.
+
+**TypeScript is told not to answer early.** `typescript-language-server` runs
+a syntax-only server beside the semantic one and lets it reply first, which
+on a cold session means a confidently wrong hover — a const whose real type
+is `TravelshiftCustomHeader.DEBUG` came back as `any`, and was still `any`
+three seconds in. `useSyntaxServer: "never"` trades a ~6s first hover for a
+true one. An agent has no way to tell a cold answer from a settled one.
+
+**Go needs a generated `go.work`**, built fresh under `~/.cache/claude-lsp/`
+because the monorepo has 7 modules and no workspace file of its own. It lives
+deliberately outside the repo: a shell `go build` never sees it, so an
+LSP-only `BrokenImport` will not reproduce on the command line. Two of those
+modules — `fastly-wasm/html-scrubber` and `fastly-wasm/wonderpush-handler` —
+both declare `module compute-starter-kit-go`, which makes `go list` fail for
+the whole workspace, so `gopls-launch` de-duplicates on the declared module
+path and drops one. The dropped module still gets full type info: gopls
+builds a fallback module view from a file's own `go.mod` when the file falls
+outside the workspace.
+
+**C# routes to the nearest per-service `.sln`**, walking up from the project
+directory. Start an agent in `src/dotnet/cars/service-car` and it gets
+`CarService.sln` in ~2.7s with real cross-project hover; start it at the repo
+root and it gets no solution and only syntactic features.
+`src/dotnet/GlobalSolution.sln` is deliberately never selected — it fails
+`MSB5023` on a stale `NestedProjects` GUID and is rejected by every
+MSBuild-based tool, including `dotnet build`. That's a pre-existing monorepo
+defect, not an LSP one. `--features metadata-uris` is on the csharp server so
+`goToDefinition` on a compiled-package symbol yields a decompiled location
+instead of nothing.
+
+**GraphQL routes to the nearest config, and repairs it if it cannot be
+loaded.** Rooting alone fixed nothing: the monorepo's config is unreadable
+three times over — named `.graphql.config.yml` when cosmiconfig looks for
+`graphql.config.*`, pointing at two schema files that do not exist, and
+naming one that fails SDL validation on a duplicated field. All three fail
+identically and silently, every response `null`. `graphql-launch` finds the
+config and, only when graphql-config genuinely cannot load it, writes a
+repaired copy under `~/.cache/claude-lsp/` — the same out-of-repo trick as
+`go.work`. Every failure path in there falls back to the plain server.
+
+**Sass has its own server.** `vscode-css-language-server` is single-file: it
+returns `null` on a `$variable` defined in a sibling file, and all 137 of the
+monorepo's SCSS imports are the legacy `@import` form.
+`some-sass-language-server` resolves them. `.css` and `.less` stayed behind,
+because some-sass matches the old server byte-for-byte on `.css` but answers
+`null` on `.less`. Both need `unknownAtRules: "ignore"`, or every `@tailwind`
+and every SCSS at-rule is flagged and buries the real diagnostics.
+
+**Swift needs a build, not just a config.** sourcekit-lsp is syntax-only
+without a compilation database, and `itvlive` is Xcode-project-only.
+`xcode-build-server config …` generates a `buildServer.json`, but that alone
+changes nothing — hover stayed `null` until one real `xcodebuild` populated
+the DerivedData index store, after which it resolves types and crosses files.
+`buildServer.json` embeds machine-specific paths, so it belongs in
+`.gitignore`, not in a commit.
+
+`intelephense`'s exclusion list works — temporarily excluding
+`src/php/service-stays` dropped a query from 77 symbols to 67 — though most
+of the listed globs target trees with essentially no PHP in them.
 
 ## Images in a pane
 
@@ -474,7 +638,7 @@ So `~/Work/guide` opens PhpStorm, `~/Work/monorepo` opens WebStorm. `⌥I` flips
 ~/.local/bin/wt-ide                 IDE detection + launch
 ~/.local/bin/wt-help                the cheat sheet (--plain for pipes)
 ~/.local/bin/kdiff                  whole-change-set diff in kitten diff
-~/.local/bin/kjobs                  what is running in every pane (F2)
+~/.local/bin/kjobs                  every command running in every pane (F2)
 ~/.local/bin/kitty-session          save / restore the workspace shape
 ~/.local/bin/kitty-notify           desktop notification tied to a pane
 ~/.config/wt/images.zsh             icat / ilast / iclear
@@ -513,8 +677,8 @@ run it, the repo is stale. `./sync status` tells you whether it is.
 
 **On a new machine.** Install kitty, workmux, Claude Code, `gh` (`brew install
 gh` — the credential step below needs it, and so does the `open-pr` skill) and
-`diffnav` (`brew install diffnav`, optional — `kdiff` falls back without it),
-then:
+`diffnav` (`brew install diffnav`, optional — `kdiff` falls back without it)
+and `lazygit` (`brew install lazygit` — `F3`), then:
 
 ```
 git clone https://github.com/arturkin/kitty-terminal.git ~/Work/terminal

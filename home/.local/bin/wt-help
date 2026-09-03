@@ -49,6 +49,9 @@ key "CMD+SHIFT+G"   "every change in this repo, side by side, in its own window"
 cmd "kdiff"                   "...here in this pane (--staged, HEAD~3, main... all work)"
 cmd "kdiff -w / -t"           "...in a new OS window / tab"
 
+head_ "Git"
+key "F3"           "lazygit here: stage hunks, branch, fetch/pull/push, rebase"
+
 head_ "IDE"
 key "ALT+O"        "open the right IDE on this worktree (auto-detected)"
 key "ALT+I"        "open the other IDE"
@@ -58,7 +61,7 @@ key "CMD+ALT+S"    "snapshot the workspace (tabs, panes, dirs, agents)"
 key "CMD+ALT+R"    "rebuild the last snapshot, resuming agents"
 key "CMD+SHIFT+R"  "reload kitty config"
 key "F1 / ALT+/"   "this sheet"
-key "F2"           "what is running in every pane - kill it, or jump to it"
+key "F2"           "every command in every pane - kill it, or jump to it"
 cmd "kitty-session ls"        "snapshots on disk (latest is saved for you)"
 cmd "kitty-session restore"   "...same as CMD+ALT+R; --dry-run, --no-agents"
 
