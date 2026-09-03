@@ -73,6 +73,12 @@
         }
       },
       "extensionToLanguage": { ".php": "php" }
+    },
+    "roslyn": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/bin/roslyn-ls",
+      "workspaceFolder": "${CLAUDE_PROJECT_DIR}",
+      "startupTimeout": 180000,
+      "extensionToLanguage": { ".cs": "csharp" }
     }
   }
 }

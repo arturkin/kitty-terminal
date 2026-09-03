@@ -62,3 +62,11 @@ fi
 
 # Inline image viewing (icat / ilast / iclear)
 [[ -f "$HOME/.config/wt/images.zsh" ]] && source "$HOME/.config/wt/images.zsh"
+
+# .NET: `brew install --cask dotnet-sdk` needs interactive sudo (a GUI admin
+# prompt), which isn't available non-interactively, so SDK 10 was installed
+# user-local via Microsoft's dotnet-install.sh instead of the cask's
+# /usr/local/share/dotnet. An old SDK 8.0.422 still sits in ~/.dotnet --
+# DOTNET_ROOT is what decides which one `dotnet` finds.
+export DOTNET_ROOT="$HOME/.local/share/dotnet"
+export PATH="$DOTNET_ROOT:$PATH"
