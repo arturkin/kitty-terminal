@@ -16,7 +16,7 @@ if [ -z "${GOWORK:-}" ] && [ ! -e "$root/go.work" ] && [ ! -e "$root/go.mod" ]; 
   mod_paths=()
   while IFS= read -r m; do
     dir="$(dirname "$m")"
-    modpath="$(awk '/^module /{print $2; exit}' "$m")"
+    modpath="$(awk '/^module /{print $2; exit}' "$m" 2>/dev/null || true)"
 
     # Two modules can declare the same module path (copy-pasted from a
     # template, never renamed). go.work requires unique paths across its
@@ -47,7 +47,7 @@ if [ -z "${GOWORK:-}" ] && [ ! -e "$root/go.work" ] && [ ! -e "$root/go.mod" ]; 
 
     # go.work's directive must be >= every module's; take the highest.
     ver="$(grep -h '^go ' "${mods[@]/%//go.mod}" 2>/dev/null \
-             | awk '{print $2}' | sort -V | tail -1)"
+             | awk '{print $2}' | sort -V | tail -1 || true)"
     [ -n "$ver" ] || ver=1.22
 
     # Regenerated on every spawn -- once per session, and always current.
