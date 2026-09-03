@@ -853,3 +853,146 @@ cd /Users/arturkin/Work/terminal && ./sync status
 git add docs/superpowers/plans/2026-09-03-lsp-plugin.md
 git commit -m "E2E results: LSP across the monorepo, a worktree and three single-language repos"
 ```
+
+---
+
+### Task 7: Four more servers — SCSS/CSS, GraphQL, Python, Bash
+
+Added after the Task 6 e2e, at the human's request, once the five original
+servers are verified. Same delivery mechanism: sibling keys in the one
+`lspServers` object. Counts that justified each are from a survey of the actual
+tracked files, not guesswork.
+
+| Server | Files it serves | Note |
+|---|---|---|
+| SCSS/CSS | 801 + 321 `.scss`, 29 + 410 `.css` | third-largest language in the monorepo |
+| GraphQL | 405 + 61 `.graphql` | schema at `src/js/graphql.schema.graphql` |
+| Python | 14 `.py` (9 in `src/bi`) | nearly free because spawning is lazy |
+| Bash | 84 `.sh` in the monorepo | **see the caveat below** |
+
+**Bash caveat, established before writing this task.** `extensionToLanguage` is
+keyed on file extension, and every script in *this* repo has no extension —
+`kdiff`, `kjobs`, `kitty-session`, `wt-help`, `wt-ide`, `wt-link`,
+`gopls-launch`. A `.sh`-keyed server cannot see any of them. Bash LSP therefore
+buys the monorepo's 84 `.sh` files and nothing in this repo. Worth having, but
+not for the reason it looks like.
+
+**Files:**
+- Modify: `home/.claude/skills/lsp/.claude-plugin/plugin.json` (four sibling keys)
+- Modify: `README.md` (extend the language-servers section from Task 5)
+
+**Interfaces:**
+- Consumes: the `lspServers` object holding the five servers from Tasks 1-4.
+- Produces: nothing later tasks depend on.
+
+- [ ] **Step 1: Install the four servers**
+
+```bash
+npm install -g vscode-langservers-extracted graphql-language-service-cli pyright bash-language-server
+for b in vscode-css-language-server graphql-lsp pyright-langserver bash-language-server; do
+  printf '%-32s %s\n' "$b" "$(command -v $b || echo MISSING)"
+done
+```
+
+All four must resolve before continuing. `vscode-langservers-extracted` is the
+package that provides `vscode-css-language-server`; there is no official
+`css-lsp` plugin in the marketplace, which is why this is hand-written.
+
+- [ ] **Step 2: Write the failing checks**
+
+From `/Users/arturkin/Work/monorepo`, each of these must currently say
+`No LSP server available for file type: <ext>`:
+
+```bash
+probe() { ( cd /Users/arturkin/Work/monorepo && echo "$1" | "$HOME/.local/bin/claude" -p --model haiku ); }
+probe "Use the LSP tool: operation=documentSymbol, filePath=$(cd ~/Work/monorepo && git ls-files '*.scss' | head -1), line=1, character=1. Report the raw tool output."
+probe "Use the LSP tool: operation=documentSymbol, filePath=$(cd ~/Work/monorepo && git ls-files '*.graphql' | head -1), line=1, character=1. Report the raw tool output."
+probe "Use the LSP tool: operation=documentSymbol, filePath=src/bi/$(cd ~/Work/monorepo && git ls-files 'src/bi/*.py' | head -1 | xargs -I{} basename {}), line=1, character=1. Report the raw tool output."
+probe "Use the LSP tool: operation=documentSymbol, filePath=$(cd ~/Work/monorepo && git ls-files '*.sh' | head -1), line=1, character=1. Report the raw tool output."
+```
+
+- [ ] **Step 3: Add the four servers**
+
+Insert as siblings of `typescript` in `lspServers`:
+
+```json
+    "css": {
+      "command": "vscode-css-language-server",
+      "args": ["--stdio"],
+      "workspaceFolder": "${CLAUDE_PROJECT_DIR}",
+      "settings": {
+        "scss": { "validate": true, "lint": { "unknownAtRules": "ignore" } },
+        "css": { "validate": true, "lint": { "unknownAtRules": "ignore" } },
+        "less": { "validate": true }
+      },
+      "extensionToLanguage": { ".css": "css", ".scss": "scss", ".less": "less" }
+    },
+    "graphql": {
+      "command": "graphql-lsp",
+      "args": ["server", "--method", "stream"],
+      "workspaceFolder": "${CLAUDE_PROJECT_DIR}",
+      "extensionToLanguage": { ".graphql": "graphql", ".gql": "graphql" }
+    },
+    "pyright": {
+      "command": "pyright-langserver",
+      "args": ["--stdio"],
+      "workspaceFolder": "${CLAUDE_PROJECT_DIR}",
+      "extensionToLanguage": { ".py": "python", ".pyi": "python" }
+    },
+    "bash": {
+      "command": "bash-language-server",
+      "args": ["start"],
+      "workspaceFolder": "${CLAUDE_PROJECT_DIR}",
+      "extensionToLanguage": { ".sh": "shellscript", ".bash": "shellscript" }
+    }
+```
+
+`unknownAtRules: "ignore"` is deliberate — without it the CSS server flags
+every SCSS `@use`, `@forward` and `@mixin` as an unknown at-rule, which would
+bury real diagnostics under hundreds of false ones.
+
+```bash
+python3 -m json.tool home/.claude/skills/lsp/.claude-plugin/plugin.json > /dev/null && echo "valid JSON"
+./sync install
+python3 -c "import json;print(sorted(json.load(open('$HOME/.claude/skills/lsp/.claude-plugin/plugin.json'))['lspServers']))"
+```
+
+Expected: `['bash', 'css', 'gopls', 'graphql', 'intelephense', 'pyright', 'roslyn', 'sourcekit', 'typescript']` — nine servers.
+
+- [ ] **Step 4: Re-run the four checks and judge them properly**
+
+Re-run Step 2's four probes. For each, the oracle is: no
+`No LSP server available`, plus raw output naming a symbol that grep confirms
+exists in the file. `documentSymbol` is syntactic, so for **SCSS** also run a
+positive semantic check — `goToDefinition` on a `$variable` or `@mixin` usage
+that is defined in a *different* `.scss` file, which is the feature that
+justifies the server at all. Report whether it resolves.
+
+GraphQL needs a `graphql.config.yml` or `.graphqlrc` to find the schema; if
+operations validate but the schema is not found, say so plainly rather than
+counting a syntax-only result as success.
+
+- [ ] **Step 5: Confirm laziness still holds**
+
+Nine registered servers must still spawn nothing until used:
+
+```bash
+before=$(pgrep -fc 'gopls|intelephense|typescript-language-server|sourcekit-lsp|CodeAnalysis.LanguageServer|css-language-server|graphql-lsp|pyright-langserver|bash-language-server' || echo 0)
+cd ~/Work/monorepo && echo "Reply with just: hello" | "$HOME/.local/bin/claude" -p --model haiku >/dev/null 2>&1
+after=$(pgrep -fc 'gopls|intelephense|typescript-language-server|sourcekit-lsp|CodeAnalysis.LanguageServer|css-language-server|graphql-lsp|pyright-langserver|bash-language-server' || echo 0)
+echo "before=$before after=$after"
+```
+
+Expected: both zero. This is the property that makes nine servers cost no more
+at rest than five.
+
+- [ ] **Step 6: Extend the README and commit**
+
+Add the four to the language-servers section, including the Bash caveat above
+and the `unknownAtRules` reason. Then:
+
+```bash
+./sync status
+git add home/.claude/skills/lsp/.claude-plugin/plugin.json README.md
+git commit -m "Four more servers: SCSS/CSS, GraphQL, Python, Bash"
+```
