@@ -11,23 +11,26 @@ file is right — both were written before the facts below were known.
 ## What is deployed
 
 One plugin, `~/.claude/skills/lsp/.claude-plugin/plugin.json`, auto-loading as
-`lsp@skills-dir`. Nine servers, no marketplace entry, no `enabledPlugins` line.
+`lsp@skills-dir`. Ten servers, no marketplace entry, no `enabledPlugins` line.
 `MANIFEST` already mirrors `.claude/skills/`, so `sync` carries it unchanged.
 
 | Key | Command | Extensions | State |
 |---|---|---|---|
 | `typescript` | `typescript-language-server` | .ts .tsx .js .jsx .mts .cts .mjs .cjs | working |
-| `gopls` | `bin/gopls-launch` | .go | working, 6 of 7 modules |
+| `gopls` | `bin/gopls-launch` | .go | working, all 7 modules |
 | `intelephense` | `intelephense` | .php | working |
-| `sourcekit` | `/usr/bin/sourcekit-lsp` | .swift | **syntax only** |
+| `sourcekit` | `/usr/bin/sourcekit-lsp` | .swift | working, **after a build** |
 | `csharp` | `bin/csharp-ls-launch` | .cs | working when rooted at a service |
-| `css` | `vscode-css-language-server` | .css .scss .less | **single-file only** |
-| `graphql` | `graphql-lsp` | .graphql .gql | **no positive signal yet** |
+| `css` | `vscode-css-language-server` | .css .less | working, single-file |
+| `scss` | `some-sass-language-server` | .scss .sass | working, cross-file |
+| `graphql` | `bin/graphql-launch` | .graphql .gql | working from any root |
 | `pyright` | `pyright-langserver` | .py .pyi | working |
 | `bash` | `bash-language-server` | .sh .bash | working (not this repo — see below) |
 
 The four official `*-lsp` plugins are set `false` in `settings.json` so exactly
-one definition claims each extension. All twenty extensions are disjoint.
+one definition claims each extension. All twenty-two extensions are disjoint —
+worth re-checking programmatically after any edit, because a duplicate claim
+fails silently.
 
 **Servers spawn lazily and die with their session.** Proven: a monorepo session
 that made no LSP call spawned zero servers, and a second check after adding four
@@ -35,12 +38,47 @@ more servers showed delta-zero. Cost is one server per *(session × language
 actually touched)* — so four agents editing TypeScript means four tsservers,
 which is why that entry carries `--max-old-space-size=4096`.
 
-## The one thing most likely to waste an hour
+## The three things most likely to waste an hour
 
-`lspServers` is a **plugin-manifest field, not a settings field**. Put it in
+**1. `lspServers` is a plugin-manifest field, not a settings field.** Put it in
 `settings.json` or pass it via `--settings` and it is silently ignored — no
 error, the server simply never registers. Probed three ways before the design
 was settled.
+
+**2. Only `${CLAUDE_PROJECT_DIR}` and `${CLAUDE_PLUGIN_ROOT}` expand.** Nothing
+else does. `${HOME}` in an `initializationOptions` value is passed through
+verbatim, and the server then creates a directory *literally named* `${HOME}`
+relative to its own cwd — which is the project you are working in. This was
+tested by trying to move intelephense's index out of `/tmp`; it created
+`monorepo/${HOME}/`. That is why intelephense still indexes to
+`/tmp/intelephense` (30MB, owned by the user, mode 755). Anything needing a real
+`$HOME` path has to go through a wrapper script, which is what the three
+wrappers in `bin/` are for.
+
+**3. A wrong answer is the real failure mode, not an empty one.** Every trap in
+this project looked like success: `documentSymbol` returning a full tree with no
+project loaded, a hover returning `any` instead of the true type, C# answering
+zero symbols instead of erroring, GraphQL returning `null` for three unrelated
+reasons at once. Test with an oracle that can come out negative, and always run
+the negative control.
+
+## TypeScript: the syntax server answers first, and it lies
+
+`typescript-language-server` runs a syntax-only server alongside the semantic
+one and lets it answer while the semantic server is still loading. On a cold
+session that produces a **confidently wrong hover**: in `src/js`, a const whose
+type is `TravelshiftCustomHeader.DEBUG` came back as `any`, and was *still*
+`any` after a 3-second settle. `goToDefinition` is correct throughout, so a
+definition-only check never notices.
+
+`initializationOptions.tsserver.useSyntaxServer: "never"` fixes it: the same
+probe returns the true type. The cost is that the first hover of a session
+blocks about 6 seconds instead of returning in 0.5. That is the right trade for
+an agent, which has no way to tell a cold answer from a settled one and no
+reason to ask twice.
+
+Found only by the `claude -p` integration run — the raw probes all used a
+generous settle time and never saw it.
 
 ## Why C# is not what the spec says
 
@@ -73,9 +111,10 @@ rather than nothing.
 you get `CarService.sln` in ~2.7s with real cross-project hover. From the
 monorepo root there is no ancestor `.sln`, so the server starts but answers with
 **zero symbols on a real class** — a confident empty answer, not an error. Start
-C# agents inside the service you are working on.
+C# agents inside the service you are working on. Both halves re-confirmed in the
+final e2e.
 
-## Go: a generated workspace, and one module left out
+## Go: a generated workspace, and one module served from outside it
 
 The monorepo has 7 `go.mod` under `src/go` and no `go.work`, so nothing resolved
 cross-module. `bin/gopls-launch` generates one under `~/.cache/claude-lsp/`,
@@ -89,34 +128,136 @@ the command line.
 `module compute-starter-kit-go`** — never renamed from the Fastly starter
 template. In workspace mode that makes `go list` fail for the *entire*
 workspace, so the wrapper de-duplicates on the declared module path and drops
-`wonderpush-handler` (first-in-sorted-order wins). 6 of 7 modules get type info
-instead of 0 of 7. Renaming that module in the monorepo recovers the seventh.
+`wonderpush-handler` (first-in-sorted-order wins). The generated
+`go.work-70a6c73f6572` lists 6 modules.
+
+**Correction to an earlier version of this document**, which claimed the dropped
+module gets syntax only. It does not. gopls v0.22.0 builds a fallback module
+view from a file's own `go.mod` when the file is outside the workspace, so
+`wonderpush-handler` gets full type info too: hover on `rtlog.Open` returns
+`func rtlog.Open(name string) *rtlog.Endpoint` with docs, and definition lands
+in the module cache. The discriminator that proves the two modules resolve
+independently is the SDK version — wonderpush resolves `compute-sdk-go@v1.3.3`,
+its own requirement, while `html-scrubber`, which won the dedup, resolves
+`v1.4.2`. Renaming the duplicate module path is still worth doing, but it buys
+tidiness, not type information.
+
+## GraphQL: rooting was the suspicion, and it was not enough
+
+The stock server rooted directly at `src/js` returns exactly the same `null`
+hover and empty completion as it does from the monorepo root. Three defects sit
+behind it, each independently fatal and each completely silent:
+
+1. **The config is named `.graphql.config.yml`.** graphql-config's cosmiconfig
+   search places are `graphql.config.*`; the leading dot disables the file.
+2. **Its `schema:` pointers name files that do not exist** —
+   `./graphql-schema.graphql` and `./graphql-hygraph-schema.graphql`. The file
+   on disk is `graphql.schema.graphql`, and the hygraph schema is absent.
+3. **That schema fails SDL validation** on a duplicated
+   `StayCategoryProductListInput.currency` (lines 14 and 23 of the input), which
+   fails *every request* rather than only the schema load.
+
+`bin/graphql-launch` finds the config — up from `${CLAUDE_PROJECT_DIR}`, then a
+pruned depth-4 walk down, 0.019s from the monorepo root — and, only when
+graphql-config genuinely cannot load it, writes a repaired config and
+de-duplicated schema under `~/.cache/claude-lsp/`, the same out-of-repo trick as
+`go.work`, passed via `--configDir`. It is stamped on file size and mtime so the
+steady state is one `stat` per schema file.
+
+Every failure path inside the repair falls through to the plain server, so a
+broken repair degrades to the previous behaviour rather than taking the language
+server down. A well-formed project takes the plain path and no config is
+generated.
+
+Verified from both the monorepo root and `src/js`: hover returns
+`Currency.rate: String` with the schema's own docstring, and completion returns
+`Currency`'s four fields with their declared types — strings that appear nowhere
+in the query document. Negative controls (an unrelated empty root, and the
+config renamed away) both return `null`.
+
+**The monorepo still deserves the real three-line fix**: rename the config,
+correct the schema pointer, delete the duplicate field. Codegen and editors
+still see the broken version. Once it lands the repair branch stops firing by
+itself.
+
+## Sass: a second server, and why `.less` did not move
+
+`vscode-css-language-server` is single-file. On two real monorepo files it
+returned `null` definition, `null` hover and an empty completion list on a
+`$variable` defined in a sibling file; `some-sass-language-server` v2.3.8
+resolved all three at the same positions, naming the declaring file. All 137 of
+the monorepo's SCSS imports are the legacy `@import` form — there is no `@use`
+or `@forward` anywhere — which is exactly the case some-sass exists for.
+
+`.less` and `.css` stayed with `vscode-css-language-server`. some-sass is
+byte-identical to it on plain `.css` (same hover, same 55 completions in the
+same order) but returns `null` for hover *and* documentSymbol on `.less` and
+ships no `less` settings section at all. Splitting keeps every extension claimed
+by exactly one server.
+
+`unknownAtRules: "ignore"` is load-bearing on both, and both default to
+`"warning"`: without it every `@tailwind` (in three real `.css` files) and every
+SCSS at-rule is flagged, burying real diagnostics. some-sass spells it under its
+own `somesass` section.
+
+Known cost: at a wide workspace root some-sass resolves a duplicated filename to
+the wrong copy — `Footer/responsive.scss`'s relative `./variables.scss` landed
+on `src/js/web/src/styles/variables.scss`. That reaches 47 of 272 variable names
+(17%), against `null` for all 272 before. The copies are near-identical
+duplicates.
+
+Performance is a non-issue: cross-file definition resolved at the full monorepo
+root with a settle of 200ms, because imports resolve on demand rather than after
+a workspace scan.
+
+## Swift: the config file alone is inert
+
+`itvlive` is Xcode-project-only — no `Package.swift`, no `compile_commands.json`
+— so sourcekit-lsp had no compilation database and was syntax-only.
+
+The fix is `xcode-build-server` plus a generated `buildServer.json`, **and one
+real build**. This is the part worth remembering: generating `buildServer.json`
+changed nothing on its own. Hover and cross-file definition returned `null`
+before the fix, and still returned `null` with `buildServer.json` in place but
+no build. Only after one `xcodebuild` succeeded — growing the DerivedData index
+store from 0 to 2693 files — did the identical probes return
+`@MainActor let player: PlayerController` and a correct cross-file definition
+into `AppModel.swift`.
+
+No manifest change: sourcekit-lsp auto-discovers `buildServer.json` in the
+workspace root.
+
+```sh
+brew install xcode-build-server
+cd ~/Work/itvlive
+xcode-build-server config -project itvlive.xcodeproj -scheme ITVLive
+xcodebuild -project itvlive.xcodeproj -scheme ITVLive -destination 'platform=macOS' build
+```
+
+`ITVLive` is a macOS-only scheme; it has no iOS destinations. Re-run the build
+whenever the index goes stale.
+
+**`buildServer.json` is left untracked in `~/Work/itvlive` and is not covered by
+its `.gitignore`**, so it shows in `git status`. It embeds machine-specific
+absolute paths — the DerivedData hash and `/opt/homebrew` — so it is a per-machine
+file and should be gitignored rather than committed.
 
 ## Known limitations
 
-- **Swift is syntax-only.** `itvlive` is Xcode-project-only: no `Package.swift`,
-  no `buildServer.json`, no `compile_commands.json`, and `xcode-build-server` is
-  not installed, so sourcekit-lsp has no compilation database. Installing
-  `xcode-build-server` and generating `buildServer.json` would fix it.
-- **SCSS is single-file.** `vscode-css-language-server` did not resolve
-  `goToDefinition` on a `$variable` defined in a sibling `.scss` reached via
-  legacy `@import`. `some-sass-language-server` (v2.3.8 on npm) is purpose-built
-  for cross-file `@use`/`@import` and is the obvious swap if cross-file Sass
-  navigation matters — untested here.
-- **GraphQL has no positive signal yet.** It registers and does not error, but
-  returned nothing useful. The cause is rooting, not a missing config: the
-  config **does** exist at `src/js/.graphql.config.yml` (schemas
-  `./graphql-schema.graphql` and `./graphql-hygraph-schema.graphql`, documents
-  `web/src/**/*.graphql`). A server rooted at the monorepo root never sees it.
-  Re-test from `src/js` before concluding anything.
 - **Bash cannot see this repo's own scripts.** `extensionToLanguage` is
   extension-keyed and `kdiff`, `kjobs`, `kitty-session`, `wt-help`, `wt-ide`,
-  `wt-link`, `gopls-launch` and `csharp-ls-launch` have no extension. The server
-  covers the monorepo's 84 `.sh` files and nothing here.
+  `wt-link` and the three LSP wrappers have no extension. The server covers the
+  monorepo's 84 `.sh` files and nothing here. Its oracle is cross-file
+  `source`-graph name resolution, not types — shell has none.
+- **Python's cross-file target is necessarily third-party.** None of the 14
+  tracked `.py` files import each other, so resolution was proven through an
+  installed package (`pymysql`, specialised as `Connection[Cursor]`) rather than
+  a first-party import.
 - **intelephense's exclusion mechanism is proven, its glob list mostly is not.**
   Temporarily excluding `src/php/service-stays` dropped a query from 77 symbols
-  to 67 with three named symbols disappearing, so `settings` reaches the server.
-  But most listed globs target trees with essentially no PHP and are near-no-ops.
+  to 67, so `settings` reaches the server. But most listed globs target trees
+  with essentially no PHP and are near-no-ops.
+- **C# from a non-service root** answers zero symbols rather than erroring.
 
 ## A restored machine needs the binaries too
 
@@ -124,64 +265,34 @@ instead of 0 of 7. Renaming that module in the monorepo recovers the seventh.
 
 ```bash
 npm install -g typescript-language-server typescript intelephense \
-  vscode-langservers-extracted graphql-language-service-cli pyright \
-  bash-language-server
+  vscode-langservers-extracted some-sass-language-server \
+  graphql-language-service-cli pyright bash-language-server
 go install golang.org/x/tools/gopls@latest
 curl -sSL https://dot.net/v1/dotnet-install.sh | bash -s -- --channel 10.0
 dotnet tool install --global csharp-ls
+brew install xcode-build-server
 ```
-`sourcekit-lsp` ships with Xcode's toolchain at `/usr/bin/sourcekit-lsp`.
+`sourcekit-lsp` ships with Xcode's toolchain at `/usr/bin/sourcekit-lsp`. Swift
+also needs the per-repo `buildServer.json` and one build, per the Swift section.
 
 ## Still open
 
-- README's language-servers section documents five servers; Task 7's four are
-  written up in `.superpowers/sdd/2026-09-03-lsp-plugin/task-7-report.md` and
-  need merging by hand (the file held in-flight edits during the run).
-- Swap SCSS to `some-sass-language-server`, or accept single-file.
-- Re-test GraphQL rooted at `src/js`.
-- Neither wrapper canonicalises its root. Harmless today because Claude Code
-  always sets `CLAUDE_PROJECT_DIR` absolute, but a relative value would make
-  `csharp-ls-launch`'s upward walk spin forever. One line in each fixes it:
-  `root="$(cd "${CLAUDE_PROJECT_DIR:-$PWD}" 2>/dev/null && pwd -P || printf '%s' "${CLAUDE_PROJECT_DIR:-$PWD}")"`.
-- `startupTimeout: 180000` on `csharp` is a Roslyn vestige; csharp-ls loads in
-  2.7s, so its only effect now is making a wedged server take three minutes to
-  give up.
-- intelephense indexes to `/tmp/intelephense` (mode 1777) rather than
-  `~/.cache/claude-lsp` like the Go wrapper. Worth aligning.
+- README's language-servers section is updated in the working tree but **not
+  committed** — that file also holds unrelated in-flight edits, so it is the
+  user's to split and commit.
+- The four monorepo defects below are all worth fixing at source.
 
-## Two monorepo bugs found by this work
+## Four monorepo bugs found by this work
 
-Neither is an LSP problem; both predate it.
+None is an LSP problem; all predate it.
 
 1. `src/dotnet/GlobalSolution.sln` fails `MSB5023` for every MSBuild-based tool.
 2. `src/go/fastly-wasm/html-scrubber` and `.../wonderpush-handler` declare the
    same module path, which breaks any Go workspace spanning both.
-
-## Appendix: README text for the four servers added last
-
-Written during the run but never applied, because `README.md` held in-flight
-edits at the time. Paste into the language-servers section and change its
-opening from "Five servers" to "Nine".
-
-**SCSS/CSS** — `vscode-css-language-server` (from `vscode-langservers-extracted`;
-there is no official `css-lsp` marketplace plugin, hence hand-written). Covers
-`.css`, `.scss`, `.less` — the third-largest language in the monorepo by file
-count (801+321 `.scss`, 29+410 `.css`). `unknownAtRules: "ignore"` is set for
-both lint settings; without it the server flags every SCSS `@use`, `@forward`
-and `@mixin` as an unknown at-rule and buries real diagnostics under hundreds of
-false ones. Single-file `documentSymbol` is accurate. Cross-file
-`goToDefinition` on a `$variable` defined in a sibling file is **not** supported.
-
-**GraphQL** — `graphql-lsp` (from `graphql-language-service-cli`), covering
-`.graphql`/`.gql` (405+61 files). It needs a `graphql.config.yml` or `.graphqlrc`
-to find a schema; one exists at `src/js/.graphql.config.yml`, so the server must
-be rooted there rather than at the monorepo root to be useful. Untested from
-that root.
-
-**Python** — `pyright-langserver`, covering `.py`/`.pyi`. Only 14 tracked `.py`
-files, 9 of them under `src/bi`. Nearly free, since spawning is lazy.
-
-**Bash** — `bash-language-server`, covering `.sh`/`.bash` (84 `.sh` files in the
-monorepo). `extensionToLanguage` is extension-keyed and every script in *this*
-repo has no extension, so it is invisible to `kdiff`, `kjobs`, `kitty-session`,
-`wt-help`, `wt-ide`, `wt-link` and both LSP wrappers.
+3. `src/js/.graphql.config.yml` is unreadable by graphql-config three times over
+   — wrong filename, dead schema pointers, and a duplicated field in the schema
+   it should point at. Codegen and editors see all three.
+4. `src/go/fastly-wasm/html-scrubber/main.go:57` **does not parse**: a `case`
+   listing four hostnames is missing the closing quote on the last one
+   (`"guidetoeurope.eu:`). `gofmt -e` reports `string literal not terminated`.
+   Committed in `d4042b8f94`, "Add GTE .eu to fastly-html-scrubber".

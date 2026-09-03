@@ -67,26 +67,45 @@ is worth re-checking against a test that could actually fail.
 
 ## Pick up here
 
-Ordered by value.
+All six items on the original list are done. What follows is what became of
+them, and what is left.
 
-1. **Merge the README appendix** from the end of `lsp-as-built.md` into the
-   language-servers section, and change "Five servers" to nine. The section
-   itself is currently uncommitted in the working tree, mixed with the user's own
-   revision — they are splitting that by hand.
-2. **Re-test GraphQL rooted at `src/js`.** Its config exists at
-   `src/js/.graphql.config.yml`; a monorepo-root session never sees it. This is
-   probably a rooting fix, not a dead end.
-3. **Decide on SCSS.** `vscode-css-language-server` is single-file;
-   `some-sass-language-server` v2.3.8 handles cross-file `@use`/`@import`, which
-   was the reason SCSS was worth adding at 1,122 files.
-4. **Swift** needs `xcode-build-server` and a generated `buildServer.json` in
-   `~/Work/itvlive` to get past syntax-only.
-5. **Canonicalise the wrapper roots** — one line in each of `gopls-launch` and
-   `csharp-ls-launch`. Harmless today because `CLAUDE_PROJECT_DIR` is always
-   absolute, but a relative value makes the C# upward walk spin forever.
-6. **Drop `startupTimeout: 180000` from the `csharp` entry.** A Roslyn vestige;
-   csharp-ls loads in 2.7s, so it only makes a wedged server take three minutes
-   to give up.
+| # | Item | Outcome |
+|---|---|---|
+| 1 | Merge the README appendix | Done, **in the working tree only** — README still holds the user's own in-flight edits, so it is theirs to split and commit |
+| 2 | Re-test GraphQL from `src/js` | Rooting was not the cause. Three silent config defects were; `bin/graphql-launch` works around all three |
+| 3 | Decide on SCSS | Swapped to `some-sass-language-server` for `.scss`/`.sass`; `.css`/`.less` stayed, because some-sass answers `null` on `.less` |
+| 4 | Swift | Fixed. Needs `xcode-build-server`, a generated `buildServer.json`, **and one real build** — the config alone is inert |
+| 5 | Canonicalise the wrapper roots | Done, and it was a live bug, not a theoretical one: 1945 spin iterations in 10s |
+| 6 | Drop `startupTimeout` from `csharp` | Done |
+
+Two findings arrived that were not on the list:
+
+- **TypeScript answered `any`.** `typescript-language-server`'s syntax server
+  replies before the semantic one and gives a confidently wrong type on a cold
+  session — still wrong at a 3s settle. `useSyntaxServer: "never"` fixes it.
+  Caught only by the `claude -p` integration run; every raw probe used a
+  generous settle time and missed it.
+- **`${HOME}` does not expand in the manifest.** Only `${CLAUDE_PROJECT_DIR}`
+  and `${CLAUDE_PLUGIN_ROOT}` do. Attempting to move intelephense's index out
+  of `/tmp` created a directory literally named `${HOME}` inside the monorepo.
+  Removed; intelephense stays on `/tmp`.
+
+And one documented fact turned out to be wrong: the Go section claimed the
+de-duplicated module gets syntax only. It gets full type info, from a gopls
+fallback module view. Corrected in `lsp-as-built.md`.
+
+## Still open
+
+- **README is uncommitted.** The language-servers section is rewritten for all
+  ten servers; the file also carries unrelated user edits.
+- **Four monorepo defects**, all listed at the end of `lsp-as-built.md`. Three
+  were known; the fourth is new and the most clear-cut:
+  `src/go/fastly-wasm/html-scrubber/main.go:57` does not parse — a `case`
+  listing four hostnames is missing the closing quote on the last
+  (`"guidetoeurope.eu:`), committed in `d4042b8f94`.
+- **`buildServer.json` is untracked in `~/Work/itvlive`** and not gitignored.
+  It embeds machine-specific paths and should be ignored, not committed.
 
 ## Not this work, but surfaced by it
 
@@ -95,5 +114,3 @@ Ordered by value.
   file is restored from the repo copy by `sync`, so the two must agree before any
   change sticks. The `deny-sensitive-files.sh` hook is still wired and still
   hard-blocks credential reads.
-- Two monorepo defects, described in `lsp-as-built.md`: the corrupt
-  `GlobalSolution.sln`, and the duplicate `module compute-starter-kit-go`.
