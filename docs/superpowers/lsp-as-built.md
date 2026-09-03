@@ -156,3 +156,32 @@ Neither is an LSP problem; both predate it.
 1. `src/dotnet/GlobalSolution.sln` fails `MSB5023` for every MSBuild-based tool.
 2. `src/go/fastly-wasm/html-scrubber` and `.../wonderpush-handler` declare the
    same module path, which breaks any Go workspace spanning both.
+
+## Appendix: README text for the four servers added last
+
+Written during the run but never applied, because `README.md` held in-flight
+edits at the time. Paste into the language-servers section and change its
+opening from "Five servers" to "Nine".
+
+**SCSS/CSS** — `vscode-css-language-server` (from `vscode-langservers-extracted`;
+there is no official `css-lsp` marketplace plugin, hence hand-written). Covers
+`.css`, `.scss`, `.less` — the third-largest language in the monorepo by file
+count (801+321 `.scss`, 29+410 `.css`). `unknownAtRules: "ignore"` is set for
+both lint settings; without it the server flags every SCSS `@use`, `@forward`
+and `@mixin` as an unknown at-rule and buries real diagnostics under hundreds of
+false ones. Single-file `documentSymbol` is accurate. Cross-file
+`goToDefinition` on a `$variable` defined in a sibling file is **not** supported.
+
+**GraphQL** — `graphql-lsp` (from `graphql-language-service-cli`), covering
+`.graphql`/`.gql` (405+61 files). It needs a `graphql.config.yml` or `.graphqlrc`
+to find a schema; one exists at `src/js/.graphql.config.yml`, so the server must
+be rooted there rather than at the monorepo root to be useful. Untested from
+that root.
+
+**Python** — `pyright-langserver`, covering `.py`/`.pyi`. Only 14 tracked `.py`
+files, 9 of them under `src/bi`. Nearly free, since spawning is lazy.
+
+**Bash** — `bash-language-server`, covering `.sh`/`.bash` (84 `.sh` files in the
+monorepo). `extensionToLanguage` is extension-keyed and every script in *this*
+repo has no extension, so it is invisible to `kdiff`, `kjobs`, `kitty-session`,
+`wt-help`, `wt-ide`, `wt-link` and both LSP wrappers.
