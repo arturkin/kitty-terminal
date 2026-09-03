@@ -87,34 +87,7 @@
       "Bash(git push:*)"
     ],
     "defaultMode": "auto",
-    "deny": [
-      "Read(**/*.p12)",
-      "Read(**/*.pem)",
-      "Read(**/*.pfx)",
-      "Read(**/.env)",
-      "Read(**/.env.*)",
-      "Read(**/credentials.json)",
-      "Read(**/id_ed25519)",
-      "Read(**/id_rsa)",
-      "Read(//Users/arturkin/.aws/**)",
-      "Read(//Users/arturkin/.bash_history)",
-      "Read(//Users/arturkin/.claude.json)",
-      "Read(//Users/arturkin/.claude/.credentials.json)",
-      "Read(//Users/arturkin/.config/doppler/**)",
-      "Read(//Users/arturkin/.config/gcloud/**)",
-      "Read(//Users/arturkin/.config/gh/**)",
-      "Read(//Users/arturkin/.docker/config.json)",
-      "Read(//Users/arturkin/.git-credentials)",
-      "Read(//Users/arturkin/.gitconfig)",
-      "Read(//Users/arturkin/.gnupg/**)",
-      "Read(//Users/arturkin/.kube/**)",
-      "Read(//Users/arturkin/.netrc)",
-      "Read(//Users/arturkin/.npmrc)",
-      "Read(//Users/arturkin/.pypirc)",
-      "Read(//Users/arturkin/.ssh/**)",
-      "Read(//Users/arturkin/.zsh_history)",
-      "Read(//Users/arturkin/.zsh_historydocker)"
-    ]
+    "deny": []
   },
   "model": "opus",
   "hooks": {
