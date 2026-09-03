@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# csharp-ls, pointed at the nearest ancestor .sln so hover/goToDefinition
+# resolve real cross-project/package types instead of degrading to
+# misc-files mode (what Roslyn's own LSP binary is stuck with -- it has no
+# --solution flag and Claude Code never sends the custom solution/open
+# notification it would need instead).
+set -euo pipefail
+export DOTNET_ROOT="${DOTNET_ROOT:-$HOME/.local/share/dotnet}"
+export PATH="$HOME/.dotnet/tools:$DOTNET_ROOT:/opt/homebrew/bin:/usr/local/bin:$PATH"
+
+root="${CLAUDE_PROJECT_DIR:-$PWD}"
+
+# Bound the upward walk at the git toplevel so it can't wander past the repo;
+# guarded because a non-repo root would otherwise kill the wrapper under -e.
+git_top="$(cd "$root" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null || true)"
+[ -n "$git_top" ] || git_top="/"
+
+# GlobalSolution.sln is never a candidate: it fails MSB5023 (a stale
+# NestedProjects entry pointing at a GUID with no matching Project()
+# declaration) in every MSBuild-based tool, csharp-ls included -- confirmed
+# with `dotnet build GlobalSolution.sln`, no LSP involved.
+solution=""
+dir="$root"
+while :; do
+  candidate="$(find "$dir" -maxdepth 1 -name '*.sln' ! -name 'GlobalSolution.sln' 2>/dev/null | sort | head -n1 || true)"
+  if [ -n "$candidate" ]; then
+    solution="$candidate"
+    break
+  fi
+  [ "$dir" = "$git_top" ] && break
+  [ "$dir" = "/" ] && break
+  dir="$(dirname "$dir")"
+done
+
+# metadata-uris: without it, goToDefinition on a symbol whose source isn't in
+# any open project (an external NuGet package, e.g.) comes back empty instead
+# of a decompiled-metadata location -- confirmed against
+# Travelshift.OpenTelemetry's AddOpenTelemetryWithGraphQl.
+if [ -n "$solution" ]; then
+  exec csharp-ls --solution "$solution" --features metadata-uris "$@"
+else
+  exec csharp-ls --features metadata-uris "$@"
+fi

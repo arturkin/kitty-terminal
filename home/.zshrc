@@ -70,3 +70,4 @@ fi
 # DOTNET_ROOT is what decides which one `dotnet` finds.
 export DOTNET_ROOT="$HOME/.local/share/dotnet"
 export PATH="$DOTNET_ROOT:$PATH"
+export PATH="$HOME/.dotnet/tools:$PATH"
