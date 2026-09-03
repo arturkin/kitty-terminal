@@ -211,13 +211,19 @@ Expected: the same symbol names as Step 2, now served by our plugin. If the tool
 
 - [ ] **Step 7: Confirm the project rooting actually changed**
 
+Foreground `sleep` is blocked in this harness, so the probe runs in the
+background and the sample is taken in a **separate** call.
+
+Call 1 — launch it with the Bash tool's `run_in_background: true`:
+
 ```bash
-cd /Users/arturkin/Work/monorepo/src/js/web && \
-echo "Use the LSP tool: operation=documentSymbol, filePath=src/utils/fetchUtils.ts, line=1, character=1. Reply with one word: done." \
-  | "$HOME/.local/bin/claude" -p --model haiku &
-sleep 20
+cd /Users/arturkin/Work/monorepo/src/js/web && echo "Use the LSP tool: operation=documentSymbol, filePath=src/utils/fetchUtils.ts, line=1, character=1. Reply with one word: done." | "$HOME/.local/bin/claude" -p --model haiku
+```
+
+Call 2 — while that runs, sample the server's working directory:
+
+```bash
 for p in $(pgrep -f typescript-language-server); do lsof -a -p "$p" -d cwd -Fn 2>/dev/null | tail -1; done
-wait
 ```
 
 Expected: a path under `/Users/arturkin/Work/monorepo`, not `/Users/arturkin/Work/terminal`.
@@ -609,6 +615,11 @@ git commit -m "C# language server, and a .NET SDK new enough for net10.0"
 
 ### Task 5: Make the new servers legible in F2, and write it down
 
+**Conditional on Task 4's outcome.** Steps 1-4 exist to strip the `dotnet`
+interpreter from an F2 row. If Task 4 took its csharp-ls fallback, csharp-ls is a
+native binary with no interpreter to strip — **skip Steps 1-4 entirely**, go
+straight to Step 6, and write the README's C# paragraph about csharp-ls instead.
+
 **Files:**
 - Modify: `home/.local/bin/kjobs:38-39` (the `INTERPRETERS` set)
 - Modify: `README.md` (new section after "What is running", which ends at line 275)
@@ -619,13 +630,19 @@ git commit -m "C# language server, and a .NET SDK new enough for net10.0"
 
 - [ ] **Step 1: Write the failing check**
 
+`kjobs` has no `.py` extension, so `spec_from_file_location` returns a spec whose
+`loader` is `None` and the snippet raises `AttributeError`. Load it through an
+explicit `SourceFileLoader`:
+
 ```bash
 python3 -c "
-import sys; sys.path.insert(0, '/Users/arturkin/Work/terminal/home/.local/bin')
-import importlib.util
-spec = importlib.util.spec_from_file_location('kjobs', '/Users/arturkin/Work/terminal/home/.local/bin/kjobs')
-m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+import importlib.util, importlib.machinery
+p = '/Users/arturkin/Work/terminal/home/.local/bin/kjobs'
+loader = importlib.machinery.SourceFileLoader('kjobs', p)
+spec = importlib.util.spec_from_loader('kjobs', loader)
+m = importlib.util.module_from_spec(spec); loader.exec_module(m)
 print(repr(m.pretty_cmd('dotnet /Users/arturkin/.local/share/roslyn-ls/Microsoft.CodeAnalysis.LanguageServer.dll --stdio --logLevel Warning')))
+print('dotnet in INTERPRETERS:', 'dotnet' in m.INTERPRETERS)
 "
 ```
 
@@ -727,13 +744,19 @@ would mean an exclusion glob is over-matching — check `**/src/js/**` and
 This is the case `wt-link` and the workmux tabs create all day, and the one most
 likely to silently root at the wrong tree.
 
+Foreground `sleep` is blocked in this harness. Launch with the Bash tool's
+`run_in_background: true`:
+
 ```bash
-cd ~/Work/monorepo-master-ab-car-widget && echo "Use the LSP tool: operation=documentSymbol, filePath=src/go/fastly-wasm/gte-redirects/main.go, line=1, character=1. Reply with one word: done."   | "$HOME/.local/bin/claude" -p --model haiku &
-sleep 25
+cd ~/Work/monorepo-master-ab-car-widget && echo "Use the LSP tool: operation=documentSymbol, filePath=src/go/fastly-wasm/gte-redirects/main.go, line=1, character=1. Reply with one word: done." | "$HOME/.local/bin/claude" -p --model haiku
+```
+
+Then, in a separate call while it runs:
+
+```bash
 for p in $(pgrep -f 'gopls|intelephense|typescript-language-server|CodeAnalysis'); do
   printf '%s -> %s\n' "$p" "$(lsof -a -p "$p" -d cwd -Fn 2>/dev/null | tail -1)"
 done
-wait
 ```
 
 Expected: every cwd under `/Users/arturkin/Work/monorepo-master-ab-car-widget`.

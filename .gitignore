@@ -10,3 +10,6 @@ __pycache__/
 # config and is the point of this repo, so it is re-included here -- a repo
 # .gitignore outranks core.excludesFile.
 !home/.claude/settings.local.json
+
+# SDD scratch for superpowers plans -- ledger, briefs, review packages.
+.superpowers/
