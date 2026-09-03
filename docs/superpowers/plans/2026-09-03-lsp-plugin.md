@@ -105,7 +105,7 @@ git commit -m "Record whether workspaceFolder expands CLAUDE_PROJECT_DIR"
 
 The two servers that need no wrapper, so this task proves the delivery mechanism — plugin loads, takes over from the official plugins, nothing double-claims an extension.
 
-**Task 0 outcome:** _not yet run._
+**Task 0 outcome:** `workspaceFolder` does NOT expand; every server gets a `cd` wrapper (see Task 3's `gopls-launch` for the pattern).
 
 **Files:**
 - Create: `home/.claude/skills/lsp/.claude-plugin/plugin.json`
