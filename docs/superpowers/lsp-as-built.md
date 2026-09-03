@@ -52,8 +52,8 @@ relative to its own cwd — which is the project you are working in. This was
 tested by trying to move intelephense's index out of `/tmp`; it created
 `monorepo/${HOME}/`. That is why intelephense still indexes to
 `/tmp/intelephense` (30MB, owned by the user, mode 755). Anything needing a real
-`$HOME` path has to go through a wrapper script, which is what the three
-wrappers in `bin/` are for.
+`$HOME` path has to go through a wrapper script, which is one of the things
+the scripts in `bin/` are for.
 
 **3. Claude Code sends the request immediately after `didOpen`.** There is no
 settle time. A server that indexes asynchronously and answers an unindexed
@@ -278,8 +278,8 @@ file and should be gitignored rather than committed.
 
 - **Bash cannot see this repo's own scripts.** `extensionToLanguage` is
   extension-keyed and `kdiff`, `kjobs`, `kitty-session`, `wt-help`, `wt-ide`,
-  `wt-link` and the three LSP wrappers have no extension. The server covers the
-  monorepo's 84 `.sh` files and nothing here. Its oracle is cross-file
+  `wt-link` and the scripts in the plugin's own `bin/` have no extension. The
+  server covers the monorepo's 84 `.sh` files and nothing here. Its oracle is cross-file
   `source`-graph name resolution, not types — shell has none.
 - **Python's cross-file target is necessarily third-party.** None of the 14
   tracked `.py` files import each other, so resolution was proven through an
