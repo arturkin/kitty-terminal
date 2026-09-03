@@ -27,6 +27,47 @@
       "command": "/usr/bin/sourcekit-lsp",
       "workspaceFolder": "${CLAUDE_PROJECT_DIR}",
       "extensionToLanguage": { ".swift": "swift" }
+    },
+    "intelephense": {
+      "command": "intelephense",
+      "args": ["--stdio"],
+      "workspaceFolder": "${CLAUDE_PROJECT_DIR}",
+      "initializationOptions": {
+        "storagePath": "/tmp/intelephense",
+        "globalStoragePath": "/tmp/intelephense-global"
+      },
+      "settings": {
+        "intelephense": {
+          "files": {
+            "maxSize": 3000000,
+            "exclude": [
+              "**/.git/**",
+              "**/node_modules/**",
+              "**/vendor/**/{Tests,tests}/**",
+              "**/.yarn/**",
+              "**/.jest-cache/**",
+              "**/dist/**",
+              "**/out/**",
+              "**/coverage/**",
+              "**/.next/**",
+              "**/.xdn/**",
+              "**/.layer0/**",
+              "**/.astro/**",
+              "**/static/namespaces/**",
+              "**/screenshots/**",
+              "**/replays/**",
+              "**/artifacts/**",
+              "**/storybook-static/**",
+              "**/src/dotnet/**",
+              "**/src/js/**",
+              "**/src/bi/**",
+              "**/src/ruby/**",
+              "**/src/python/**"
+            ]
+          }
+        }
+      },
+      "extensionToLanguage": { ".php": "php" }
     }
   }
 }
