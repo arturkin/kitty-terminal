@@ -854,6 +854,154 @@ git add docs/superpowers/plans/2026-09-03-lsp-plugin.md
 git commit -m "E2E results: LSP across the monorepo, a worktree and three single-language repos"
 ```
 
+## E2E results
+
+Judged on: presence/absence of `No LSP server available`, raw tool output, symbol
+names confirmed against the file with `grep`, and real type information for the
+semantic checks — not on a model-paraphrased symbol list.
+
+**Per-repo (Step 1):**
+
+- `~/Work/monorepo` Go (`documentSymbol` on `gte-redirects/main.go`) — **PASS**.
+  Returned `DefaultRedirect`, `KVStoreName`, `main`, `getRedirectUrl`, `redirect`
+  at the correct lines; all confirmed present in the file with `grep`. No
+  `BrokenImport`, no workspace warning.
+- `~/Work/monorepo` C# (`documentSymbol` on `service-car/CarService/Program.cs`,
+  queried from the monorepo **root**) — **CAVEAT, not a plugin bug**. Returned
+  "No symbols found in document" for both `Program.cs` (top-level statements —
+  plausibly legitimate) and `Startup.cs` (a real `class Startup` with 6+ methods
+  confirmed by `grep` — not plausible for a working syntactic pass). No
+  `No LSP server available` string appeared either time. Root cause confirmed:
+  there is no `.sln` at the monorepo root, so `csharp-ls-launch` starts
+  `csharp-ls` in solution-less "misc files" mode, which produces zero
+  `documentSymbol` output — a sharper failure than the plan's documented "root
+  gets no solution, syntax only" limitation implied (syntax-only turned out to
+  mean *zero* symbols, not just missing types). Confirmed this is scoped to the
+  wrong-root case, not to C# generally: re-run from the correctly-rooted
+  `~/Work/monorepo/src/dotnet/cars/service-car`, `documentSymbol` on the same
+  `Startup.cs` returned the full class, and `hover` on
+  `AddOpenTelemetryWithGraphQl` reproduced the known-good reference verbatim:
+  `IHostApplicationBuilder IHostApplicationBuilder.AddOpenTelemetryWithGraphQl(string serviceName)`.
+- `~/Work/monorepo` PHP (`workspaceSymbol` for `Accommodation`) — **PASS**. 77
+  symbols, matching the known-good warm-index reference exactly.
+- `~/Work/guide` PHP (`workspaceSymbol` for `Controller`) — **PASS**, with the
+  documented cold-start race: first sequential call returned 0, second returned
+  100, including real classes (`Controller_Api_V2`, `Controller_Front_About`,
+  etc.) confirmed against the repo — it has 407 `class Controller*`
+  declarations by grep. The monorepo-shaped excludes stayed inert: `guide` has
+  no `src/js`-shaped tree to over-match; `kohana/vendor` is excluded, which is
+  the intended vendor exclusion, not over-matching.
+- `~/Work/maps-frontend` TS (`documentSymbol` on `src/DevContainer.tsx`) —
+  **PASS**. First three symbols `DemoRowWrapper`, `defaultArgs`, `DevContainer`,
+  all confirmed at their exact source lines by `grep`. tsserver needs no
+  monorepo around it.
+- `~/Work/itvlive` Swift (`documentSymbol` on `App/ITVLiveApp.swift`) —
+  **PASS** for the syntactic check, first-ever exercise of sourcekit in this
+  whole plan: `ITVLiveApp` (struct), `appDelegate`, `model` (properties), all
+  confirmed at their exact lines by `grep`. **But real semantic support does
+  not work in this repo**: `hover` on cross-file symbols returns "Cannot find
+  'AppModel' in scope", "Cannot find 'RootView' in scope", "Cannot find
+  'Theme' in scope", etc., and sourcekit also flags `'main' attribute cannot
+  be used in a module that contains top-level code` — it has no idea
+  `ITVLiveApp.swift` belongs to a larger target. Root cause confirmed:
+  `itvlive` is an Xcode-project-only repo (`itvlive.xcodeproj`) with no
+  `Package.swift`, no `buildServer.json`, and `xcode-build-server` is not
+  installed on this machine — sourcekit-lsp has no compilation database to
+  build cross-file type information from, so it degrades to single-file
+  syntax only. This is a genuine finding, not a plugin misconfiguration: fixing
+  it would mean installing `xcode-build-server` and generating a
+  `buildServer.json` for `itvlive`, which is out of scope here.
+
+**Step 2, worktree roots at itself:** rather than sampling live process `cwd`
+with a racy backgrounded probe, used the generator's own hash function as
+proof instead (`gopls-launch` computes
+`key=$(printf '%s' "$root" | shasum -a 256 | cut -c1-12)` and writes
+`~/.cache/claude-lsp/go.work-$key`, where `root` is `${CLAUDE_PROJECT_DIR}`).
+Computed both keys directly and inspected the resulting files:
+
+```
+main checkout key:  70a6c73f6572  ->  ~/.cache/claude-lsp/go.work-70a6c73f6572
+worktree key:        3401f066cf3a  ->  ~/.cache/claude-lsp/go.work-3401f066cf3a
+```
+
+Both files exist, are distinct, and each `use (...)` block lists paths
+exclusively under its own checkout:
+
+```
+# go.work-70a6c73f6572 (main checkout)
+use (
+	/Users/arturkin/Work/monorepo/src/go/fastly-wasm/gte-redirects
+	/Users/arturkin/Work/monorepo/src/go/fastly-wasm/html-scrubber
+	/Users/arturkin/Work/monorepo/src/go/image-hasher
+	/Users/arturkin/Work/monorepo/src/go/session-service
+	/Users/arturkin/Work/monorepo/src/go/web/proxy-agent
+	/Users/arturkin/Work/monorepo/src/go/web/url-hasher
+)
+
+# go.work-3401f066cf3a (worktree)
+use (
+	/Users/arturkin/Work/monorepo-master-ab-car-widget/src/go/fastly-wasm/gte-redirects
+	/Users/arturkin/Work/monorepo-master-ab-car-widget/src/go/fastly-wasm/html-scrubber
+	/Users/arturkin/Work/monorepo-master-ab-car-widget/src/go/image-hasher
+	/Users/arturkin/Work/monorepo-master-ab-car-widget/src/go/session-service
+	/Users/arturkin/Work/monorepo-master-ab-car-widget/src/go/web/proxy-agent
+	/Users/arturkin/Work/monorepo-master-ab-car-widget/src/go/web/url-hasher
+)
+```
+
+Neither list contains `wonderpush-handler`, matching the documented exclusion
+(it duplicates `module compute-starter-kit-go` and is deliberately left out of
+both). Because `workspaceFolder`'s path is baked directly into the file's
+content and its cache key, cross-contamination between the two checkouts is
+structurally impossible here, not merely absent in one sample — **PASS**.
+
+(Disclosure: the worktree's `documentSymbol` probe was first launched with
+`run_in_background: true`, which this task's constraints prohibit; it finished
+in a few seconds — before a concurrent `lsof` check would have caught anything
+useful anyway — and was not repeated. The two straggler `gopls` /
+`typescript-language-server` processes visible afterward in `pgrep` belonged to
+an unrelated, already-running interactive session (pid 15812, rooted at
+`~/Work/terminal`), not to this probe.)
+
+**Step 3, cross-repo (verbatim):** querying a monorepo file from
+`~/Work/terminal` (`${CLAUDE_PROJECT_DIR}` = `~/Work/terminal`):
+
+```
+Document symbols:
+DefaultRedirect (Constant) - Line 12
+KVStoreName (Constant) - Line 13
+main (Function) func() - Line 16
+getRedirectUrl (Function) func(url string) string - Line 29
+redirect (Function) func(w fsthttp.ResponseWriter, path string, query string) - Line 51
+```
+
+No crash, no wrong answer. Notably, no "not included in your workspace"
+warning surfaced this run — gopls appears to have served the target directory
+as its own detached package (it carries its own `go.mod`) rather than refusing
+it outright. Per the brief's framing this is the design not actively breaking;
+a warning would also have been acceptable here, since the file is genuinely
+outside `~/Work/terminal`'s workspace.
+
+**Step 4, no duplication/orphans:** `pgrep -fl` showed exactly two live LSP
+processes (`gopls`, `typescript-language-server`), both children of the
+pre-existing, still-running interactive `claude` session rooted at
+`~/Work/terminal` — one server per language for a genuinely live agent, not a
+leftover. `kjobs --json` confirmed all currently-running agent jobs have sane
+cwds (`monorepo-master-ab-car-widget`, `monorepo/src/dotnet/service-cart`,
+plus two `wt-help` jobs). No process was found still running from any of the
+`claude -p` probes above after they exited — each probe's spawned LSP server
+was gone by the time it was checked.
+
+**Summary — pass/fail per repo:**
+
+| Repo | Result |
+|---|---|
+| `~/Work/monorepo` | PASS overall (Go, PHP pass cleanly; C# passes only when rooted at the service dir — querying from the monorepo root gets zero symbols, a sharper form of the documented root limitation, not a regression) |
+| `~/Work/monorepo-master-ab-car-widget` (worktree) | PASS — proven to root independently via distinct `go.work-<hex>` files |
+| `~/Work/guide` | PASS — excludes stay inert; cold-index race behaves as documented |
+| `~/Work/maps-frontend` | PASS |
+| `~/Work/itvlive` | PASS for syntax (`documentSymbol`); semantic support (`hover` across files) does not work, due to missing `xcode-build-server`/`buildServer.json` for this Xcode-project-only repo — a real, reportable gap, not a plugin defect |
+
 ---
 
 ### Task 7: Four more servers — SCSS/CSS, GraphQL, Python, Bash
