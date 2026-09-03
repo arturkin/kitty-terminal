@@ -364,10 +364,14 @@ path and drops one. The dropped module still gets full type info: gopls
 builds a fallback module view from a file's own `go.mod` when the file falls
 outside the workspace.
 
-**C# routes to the nearest per-service `.sln`**, walking up from the project
-directory. Start an agent in `src/dotnet/cars/service-car` and it gets
-`CarService.sln` in ~2.7s with real cross-project hover; start it at the repo
-root and it gets no solution and only syntactic features.
+**C# routes to the nearest per-service `.sln`**, walking up from the *file you
+open* rather than from wherever the session started. csharp-ls loads one
+solution and picks it before it starts, so rooted at the monorepo it used to
+find none and answer every query empty — confidently, not as an error, and the
+rule "start C# agents inside the service" is the kind nobody remembers. A proxy
+now chooses late: the first `.cs` file opened says which service is in play, and
+the server is restarted against that solution and the session replayed into it.
+Costs one restart, about 3s, on the first C# file of a session.
 `src/dotnet/GlobalSolution.sln` is deliberately never selected — it fails
 `MSB5023` on a stale `NestedProjects` GUID and is rejected by every
 MSBuild-based tool, including `dotnet build`. That's a pre-existing monorepo

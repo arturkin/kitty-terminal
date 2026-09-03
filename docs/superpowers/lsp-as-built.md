@@ -20,7 +20,7 @@ One plugin, `~/.claude/skills/lsp/.claude-plugin/plugin.json`, auto-loading as
 | `gopls` | `bin/gopls-launch` | .go | working, all 7 modules |
 | `intelephense` | `intelephense` | .php | working |
 | `sourcekit` | `/usr/bin/sourcekit-lsp` | .swift | working, **after a build** |
-| `csharp` | `bin/csharp-ls-launch` | .cs | working when rooted at a service |
+| `csharp` | `bin/csharp-ls-launch` → proxy | .cs | working from any root |
 | `css` | `vscode-css-language-server` | .css .less | working, single-file |
 | `scss` | `bin/lsp-settle` → `some-sass-language-server` | .scss .sass | working, cross-file |
 | `graphql` | `bin/lsp-settle` → `bin/graphql-launch` | .graphql .gql | working from any root |
@@ -133,18 +133,41 @@ halves are impossible. Three facts, each expensive to rediscover:
    SDK 10.0.400 was installed user-local via Microsoft's `dotnet-install.sh` at
    `~/.local/share/dotnet`. The orphaned SDK 8.0.422 at `~/.dotnet` is untouched.
 
-So `csharp-ls` shipped instead, behind `bin/csharp-ls-launch`, which walks up
-from `${CLAUDE_PROJECT_DIR}` to the nearest per-service `.sln` and deliberately
-never selects `GlobalSolution.sln`. `--features metadata-uris` is set so
-`goToDefinition` on a compiled-package symbol yields a decompiled location
-rather than nothing.
+So `csharp-ls` shipped instead, behind `bin/csharp-ls-launch`, which walks up to
+the nearest per-service `.sln` and deliberately never selects
+`GlobalSolution.sln`. `--features metadata-uris` is set so `goToDefinition` on a
+compiled-package symbol yields a decompiled location rather than nothing. The
+walk starts at the file being opened, not at the session root — see below.
 
-**This makes rooting load-bearing for C#.** From `src/dotnet/cars/service-car`
-you get `CarService.sln` in ~2.7s with real cross-project hover. From the
-monorepo root there is no ancestor `.sln`, so the server starts but answers with
-**zero symbols on a real class** — a confident empty answer, not an error. Start
-C# agents inside the service you are working on. Both halves re-confirmed in the
-final e2e.
+### Rooting used to be load-bearing; it is not any more
+
+From `src/dotnet/cars/service-car` you get `CarService.sln` in ~2.7s. From the
+monorepo root there is no ancestor `.sln`, so the server started and answered
+**zero symbols on a real class** — a confident empty answer, not an error. The
+rule was "start C# agents inside the service", which is the kind of rule nobody
+remembers.
+
+`bin/csharp-ls-proxy.js` removes it. The solution is now chosen *late*: the
+server starts on whatever the root yields, and the first `textDocument/didOpen`
+naming a `.cs` file says which service is actually in play. If that resolves to
+a different `.sln`, the server is restarted against it and the session is
+replayed into it. The client is never told and does not need to be — it keeps
+the capabilities of the first server, which came from the same binary.
+
+Two details make it safe. The replayed `initialize` carries a sentinel id
+(`2147483647`) so its response can be swallowed instead of reaching a client
+that already has one. And re-roots are capped at five, so an agent hopping
+between services degrades to "stays on the last one" rather than thrashing.
+
+An aggregate solution was the obvious alternative and does not work here: 322
+projects across 120 solutions and five target frameworks, most of which the one
+installed SDK cannot load.
+
+Verified from the monorepo root on a genuinely cross-project symbol —
+`goToDefinition` on `MappingData` lands in the sibling project's source, where
+plain csharp-ls at the same root and position returns `null`. Note that a BCL
+type like `Stopwatch` is *not* a valid oracle here: it can resolve without the
+solution.
 
 ## Go: a generated workspace, and one module served from outside it
 
@@ -289,7 +312,6 @@ file and should be gitignored rather than committed.
   Temporarily excluding `src/php/service-stays` dropped a query from 77 symbols
   to 67, so `settings` reaches the server. But most listed globs target trees
   with essentially no PHP and are near-no-ops.
-- **C# from a non-service root** answers zero symbols rather than erroring.
 
 ## A restored machine needs the binaries too
 
@@ -316,6 +338,8 @@ also needs the per-repo `buildServer.json` and one build, per the Swift section.
 - `lsp-settle`'s 500ms is a margin over measured thresholds, not a tuned value.
   If a server is ever added that needs longer, the symptom will be a
   first-call-only empty result.
+- The C# re-root costs one server restart (~3s) on the first `.cs` file of a
+  session, and only when the session root is not already inside the service.
 
 ## Four monorepo bugs found by this work
 
