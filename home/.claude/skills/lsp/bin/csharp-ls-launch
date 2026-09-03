@@ -8,7 +8,11 @@ set -euo pipefail
 export DOTNET_ROOT="${DOTNET_ROOT:-$HOME/.local/share/dotnet}"
 export PATH="$HOME/.dotnet/tools:$DOTNET_ROOT:/opt/homebrew/bin:/usr/local/bin:$PATH"
 
-root="${CLAUDE_PROJECT_DIR:-$PWD}"
+# Canonicalised: the upward walk below compares against git's (physical)
+# toplevel, and a relative or symlinked root would never match it -- the
+# relative case spinning until dirname bottoms out at ".".
+root="$(cd "${CLAUDE_PROJECT_DIR:-$PWD}" 2>/dev/null && pwd -P \
+        || printf '%s' "${CLAUDE_PROJECT_DIR:-$PWD}")"
 
 # Bound the upward walk at the git toplevel so it can't wander past the repo;
 # guarded because a non-repo root would otherwise kill the wrapper under -e.

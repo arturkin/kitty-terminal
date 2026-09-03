@@ -7,7 +7,10 @@
 set -euo pipefail
 export PATH="$HOME/go/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 
-root="${CLAUDE_PROJECT_DIR:-$PWD}"
+# Canonicalised so the cache key below is stable: /tmp and /private/tmp are
+# the same tree but hash to two different go.work files.
+root="$(cd "${CLAUDE_PROJECT_DIR:-$PWD}" 2>/dev/null && pwd -P \
+        || printf '%s' "${CLAUDE_PROJECT_DIR:-$PWD}")"
 
 # A single-module repo, or one that already declares its own workspace, is left
 # alone: setting GOWORK on those changes what gopls resolves, for the worse.

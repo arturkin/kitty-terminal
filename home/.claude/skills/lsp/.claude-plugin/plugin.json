@@ -77,7 +77,6 @@
     "csharp": {
       "command": "${CLAUDE_PLUGIN_ROOT}/bin/csharp-ls-launch",
       "workspaceFolder": "${CLAUDE_PROJECT_DIR}",
-      "startupTimeout": 180000,
       "extensionToLanguage": { ".cs": "csharp" }
     },
     "css": {
