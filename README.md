@@ -170,6 +170,16 @@ anywhere); the file tree and `?`-listed jumps are what replace it.
 
 Untracked files are not shown — `git diff` does not see them.
 
+`esc` closes diffnav too, but that one is a translation rather than a setting:
+diffnav quits on `q`, has no ESC binding and no config file to add one, so
+kitty rewrites ESC to `q` while a window titled `diff: …` has focus. `kdiff`
+sets that title before handing off. Rewriting the key rather than closing the
+window matters for a bare `kdiff`, which runs in the pane you are already in —
+closing that would take your shell with it. Two edges: with diffnav's search
+prompt open, ESC types a `q` into it instead of quitting, and for a moment
+after diffnav exits the title has not reverted, so an ESC lands a stray `q` at
+your prompt.
+
 ## Doing something about it
 
 `F3` opens [lazygit](https://github.com/jesseduffield/lazygit) as an overlay
@@ -186,8 +196,13 @@ c               commit          n   new branch (in Branches)
 f / p / P       fetch / pull / push
 r               rebase onto the selected branch      s   stash
 o               open a PR for this branch (uses gh)
-q               close
+q or esc        close
 ```
+
+`esc` closes it because `quitOnTopLevelReturn` is on. Inside a menu, a panel
+or a diff, `esc` still means "return" — lazygit's own use of the key is
+untouched; the setting only adds the top level, so the last `esc` closes the
+whole thing the way every other overlay here does.
 
 `?` lists every key in context. A second `F3` does nothing on purpose: it is
 unmapped while lazygit has focus, so the key reaches lazygit rather than

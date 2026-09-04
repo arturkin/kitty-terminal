@@ -24,3 +24,8 @@ git:
   diffRenderers:
     - colorArg: always
       command: delta --dark --paging=never
+
+# ESC quits when nothing is open to back out of. Inside a menu, a panel or a
+# diff it still means "return", which is what lazygit uses <esc> for -- this
+# only adds the top level, so ESC closes the whole thing like every overlay.
+quitOnTopLevelReturn: true

@@ -51,6 +51,7 @@ cmd "kdiff -w / -t"           "...in a new OS window / tab"
 
 head_ "Git"
 key "F3"           "lazygit here: stage hunks, branch, fetch/pull/push, rebase"
+key ""             "  ESC closes it, and closes the diff viewer too"
 key "CMD+SHIFT+T"  "update project: fetch, prune, merge upstream (autostashes)"
 key "CMD+SHIFT+K"  "commit and push: lazygit, opened on the file list"
 cmd "kpull"                   "...the update, here in this pane (-f fetches only)"
