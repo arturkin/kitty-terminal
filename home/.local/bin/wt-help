@@ -48,6 +48,7 @@ head_ "Diff"
 key "CMD+SHIFT+G"   "every change in this repo, side by side, in its own window"
 cmd "kdiff"                   "...here in this pane (--staged, HEAD~3, main... all work)"
 cmd "kdiff -w / -t"           "...in a new OS window / tab"
+key ""             "  inside it: s unified (wider), e hide the tree, ? all keys"
 
 head_ "Git"
 key "F3"           "lazygit here: stage hunks, branch, fetch/pull/push, rebase"

@@ -18,8 +18,8 @@
 # kitten diff. $KDIFF_VIEWER=kitten|diffnav overrides; -k forces kitten diff,
 # which is the one that renders images.
 #
-# Keys in diffnav: ? or F1 lists them - moving between files, toggling the file
-# tree, side-by-side vs unified, and search.
+# Keys in diffnav: s unified (wider, no filler rows), e hide the tree, n/p
+# next/previous file, ? or F1 for the rest. Tab width is delta's `tabs`.
 # Keys in kitten diff: j/k scroll, n/p next/previous change, / search, a all
 # context, q quit. Untracked files are not shown - git diff does not see them.
 set -uo pipefail
@@ -106,7 +106,7 @@ if [ "$viewer" = diffnav ] && ! command -v diffnav >/dev/null 2>&1; then
 fi
 
 if [ "$viewer" = diffnav ]; then
-  # diffnav has no config and no ESC binding, so ESC is handled a level up:
+  # diffnav's config file has no key bindings in it, so ESC is a level up:
   # kitty rewrites it to `q` while a window titled "diff: ..." has focus. The
   # -w/-t paths already get this title from `launch --title`; this covers the
   # ones that run here, including CMD+SHIFT+G's own OS window.

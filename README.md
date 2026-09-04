@@ -170,9 +170,41 @@ anywhere); the file tree and `?`-listed jumps are what replace it.
 
 Untracked files are not shown — `git diff` does not see them.
 
+### Making it fit
+
+Tab-indented files are the worst case: delta renders a tab as **eight** spaces
+by default, so a method body in a `.cs` file starts three quarters of the way
+across its pane. Two spaces is the setting, and it lives in delta rather than
+diffnav — diffnav owns the frame, delta owns the diff body:
+
+```gitconfig
+[delta]
+	tabs = 2
+	hunk-header-decoration-style = none
+```
+
+`tabs = 2` is the readability fix. `hunk-header-decoration-style = none` drops
+the box drawn around every hunk header while keeping the header itself, which
+is the line that tells you *where* you are (`3: namespace Models`) — two rows
+back per hunk, and a busy file has a lot of hunks.
+
+`~/.config/diffnav/config.yml` hides the `DIFFNAV` banner, the one row of the
+frame that carries no information. The rest of the frame is not configurable:
+the breadcrumb, the search prompt and the box around each file header are
+hardcoded, and that last one is passed to delta on the command line where a
+config file cannot reach it. Measured on one file with one hunk, the frame
+above the first line of code goes from 14 rows to 11.
+
+Past that the levers are keys, not settings. **`s`** switches to unified,
+which is the big one: side-by-side splits the width in two *and* spends a
+blank row opposite every insertion, so unified roughly doubles the characters
+per line and drops the filler. **`e`** hides the file tree for the full width.
+Neither is worth making the default — both are one keystroke, and the tree is
+the reason to use diffnav in the first place.
+
 `esc` closes diffnav too, but that one is a translation rather than a setting:
-diffnav quits on `q`, has no ESC binding and no config file to add one, so
-kitty rewrites ESC to `q` while a window titled `diff: …` has focus. `kdiff`
+diffnav quits on `q` and its config file has no key bindings in it, so kitty
+rewrites ESC to `q` while a window titled `diff: …` has focus. `kdiff`
 sets that title before handing off. Rewriting the key rather than closing the
 window matters for a bare `kdiff`, which runs in the pane you are already in —
 closing that would take your shell with it. Two edges: with diffnav's search

@@ -1,0 +1,13 @@
+# diffnav, the viewer behind kdiff and CMD+SHIFT+G.
+#
+# Only the banner is reclaimable here. The breadcrumb, the search prompt and
+# the box around each file header are not options, and that box is handed to
+# delta on the command line, where config cannot reach it. Everything about
+# the diff body -- tab width, the box around hunk headers -- belongs to delta
+# and lives in the [delta] section of the global git config instead.
+#
+# The density controls that matter are keys, not settings: `s` toggles
+# unified (full width, no filler rows opposite an insertion), `e` hides the
+# file tree, `?` lists the rest.
+ui:
+  hideHeader: true
