@@ -56,7 +56,11 @@ if ! git rev-parse --show-toplevel >/dev/null 2>&1; then
 fi
 
 if [ "$where" != here ]; then
+  # Matches CMD+SHIFT+G. Only the windows kdiff creates get tinted: a bare
+  # kdiff runs in a pane you already own, and recolouring that would outlast
+  # the diff.
   exec kitten @ launch --type="$where" --cwd "$PWD" \
+    --color background=#1a1a24 \
     --title "diff: $(basename "$(git rev-parse --show-toplevel)")" \
     --os-window-title "diff: $(basename "$(git rev-parse --show-toplevel)")" \
     "$0" ${force_kitten:+-k} "$@"

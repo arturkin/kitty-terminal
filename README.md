@@ -148,6 +148,13 @@ kdiff -w               # in a new OS window (what ⌘⇧G does)
 kdiff -t               # in a new tab
 ```
 
+The windows `kdiff` opens are tinted `#1a1a24` rather than the usual black, so
+the diff is recognisable among a screenful of terminals. `macos_titlebar_color`
+is `background`, so the titlebar with the close buttons takes the shade too —
+that is the only way to colour one window's titlebar, and it means the body
+and the titlebar share it. A bare `kdiff` is left alone: it runs in a pane you
+already own, and recolouring that would outlast the diff.
+
 Bare `kdiff` diffs against the point where this branch left the base branch, so
 **committed, staged and unstaged changes all show at once** and a local commit
 does not empty the view. Base is `$KDIFF_BASE` if set, otherwise origin's
