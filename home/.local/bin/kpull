@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+# Update this repo from its remote, the way WebStorm's "Update Project" does:
+# fetch every remote, prune branches that are gone, then merge the upstream
+# branch into this one. Bound to CMD+SHIFT+T in kitty.conf, where it opens as
+# an overlay over the current pane.
+#
+#   kpull        fetch --all --prune, then merge the upstream branch
+#   kpull -f     fetch and prune only, merge nothing
+#   kpull -h     this text
+#
+# A dirty tree is not a reason to refuse: local changes are stashed for the
+# merge and restored after it. Conflicts are left exactly where they are --
+# F3 (lazygit) is where you resolve them.
+set -uo pipefail
+
+# kitty's `launch` runs with the GUI app's PATH -- no Homebrew, because it
+# never sources a login shell. Same fixup as kdiff.
+for _d in /opt/homebrew/bin /usr/local/bin "$HOME/.local/bin"; do
+  case ":$PATH:" in
+    *":$_d:"*) ;;
+    *) [ -d "$_d" ] && PATH="$PATH:$_d" ;;
+  esac
+done
+unset _d
+export PATH
+
+if [ -t 1 ] && [ "$(tput colors 2>/dev/null || echo 0)" -ge 8 ]; then
+  B=$'\033[1m'; D=$'\033[2m'; OK=$'\033[38;5;114m'; E=$'\033[38;5;210m'; R=$'\033[0m'
+else
+  B=''; D=''; OK=''; E=''; R=''
+fi
+
+pause() {
+  [ -t 0 ] || return 0
+  printf '\n%spress any key to close%s' "$D" "$R"
+  read -rsn1 </dev/tty 2>/dev/null
+  echo
+}
+
+fetch_only=0
+case "${1:-}" in
+  -f|--fetch-only) fetch_only=1 ;;
+  -h|--help) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  '') ;;
+  *) printf 'kpull: unknown argument: %s\n' "$1" >&2; exit 2 ;;
+esac
+
+if ! top=$(git rev-parse --show-toplevel 2>/dev/null); then
+  printf '%skpull:%s not inside a git repository: %s\n' "$E" "$R" "$PWD" >&2
+  pause; exit 1
+fi
+
+branch=$(git symbolic-ref --quiet --short HEAD 2>/dev/null) || branch=''
+upstream=$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null) || upstream=''
+
+printf '%s%s%s  %s%s%s\n' \
+  "$B" "$(basename "$top")" "$R" \
+  "$D" "${branch:-detached HEAD}${upstream:+ -> $upstream}" "$R"
+
+printf '\n%s$ git fetch --all --prune%s\n' "$D" "$R"
+if ! git fetch --all --prune; then
+  printf '\n%sFetch failed.%s\n' "$E" "$R"
+  pause; exit 1
+fi
+
+if [ "$fetch_only" = 1 ]; then
+  printf '\n%sFetched.%s\n' "$OK" "$R"
+  pause; exit 0
+fi
+
+if [ -z "$branch" ]; then
+  printf '\n%sFetched.%s Detached HEAD, so there is nothing to merge into.\n' "$OK" "$R"
+  pause; exit 0
+fi
+
+if [ -z "$upstream" ]; then
+  printf '\n%sFetched.%s Branch %s has no upstream, so nothing was merged.\n' "$OK" "$R" "$branch"
+  printf '%sPublish it with%s git push -u origin %s%s\n' "$D" "$R$B" "$branch" "$R"
+  pause; exit 0
+fi
+
+before=$(git rev-parse HEAD)
+
+printf '\n%s$ git pull --no-rebase --autostash%s\n' "$D" "$R"
+if ! git pull --no-rebase --autostash; then
+  printf '\n%sThe merge did not finish.%s Resolve it in lazygit (F3), or back out with\n' "$E" "$R"
+  printf '%s  git merge --abort%s\n' "$B" "$R"
+  pause; exit 1
+fi
+
+after=$(git rev-parse HEAD)
+if [ "$before" != "$after" ]; then
+  # git pull already printed the diffstat; the commit list is what it omits.
+  printf '\n%sMerged%s\n\n' "$OK" "$R"
+  git --no-pager log --oneline --no-decorate "$before..$after"
+fi
+pause

@@ -56,6 +56,8 @@ for and nothing that can end up inconsistent — and it re-flows correctly when 
 | `F1` or `⌥/` | **cheat sheet** — every shortcut and command; press again to close |
 | `F2` | **what is running** — every command in every pane; press again to close |
 | `F3` | **git** — lazygit over this pane, rooted where the pane is |
+| `⌘⇧T` | **update project** — fetch, prune, merge upstream; autostashes |
+| `⌘⇧K` | **commit and push** — lazygit, opened on the file list |
 
 `⌘K` on its own would clear the scrollback and leave the visible screen alone,
 so it looks like nothing happened. Terminal.app wipes both, so here it is
@@ -191,6 +193,28 @@ q               close
 unmapped while lazygit has focus, so the key reaches lazygit rather than
 stacking a second overlay — and it is a no-op rather than a kill, which matters
 in the middle of a rebase.
+
+The two WebStorm keys are shortcuts into the same two halves. `⌘⇧K` is that
+lazygit again with the file list enlarged against the diff rather than the
+four-panel dashboard — the commit dialog, one `c` and one `P` from pushed.
+`⌘⇧T` is Update Project, and it runs `kpull`:
+
+```
+kpull                  # fetch --all --prune, then merge the upstream branch
+kpull -f               # fetch and prune only
+```
+
+A dirty tree is not a reason to refuse — the merge autostashes, and git
+reapplies that itself whether you go on to finish the merge or `git merge
+--abort` it. A conflict is left exactly where it is, for `F3` to resolve.
+WebStorm puts Update Project on `⌘T`; here that stays new-tab, so it moved one
+modifier over.
+
+Both lazygit maps set `PATH` before exec'ing. kitty's `launch` hands its child
+only `/Applications/kitty.app/Contents/MacOS` and the system directories —
+kitty resolves `lazygit` itself, but lazygit then cannot find `delta`, and the
+diff pane renders `delta: command not found`. `kdiff` and `kpull` carry the
+same fixup inside the scripts.
 
 Two deliberate config choices in `~/.config/lazygit/config.yml`: diffs render
 through `delta`, so they look the same here as in `git diff` and `kdiff`; and
