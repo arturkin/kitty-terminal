@@ -195,12 +195,16 @@ hardcoded, and that last one is passed to delta on the command line where a
 config file cannot reach it. Measured on one file with one hunk, the frame
 above the first line of code goes from 14 rows to 11.
 
-Past that the levers are keys, not settings. **`s`** switches to unified,
-which is the big one: side-by-side splits the width in two *and* spends a
-blank row opposite every insertion, so unified roughly doubles the characters
-per line and drops the filler. **`e`** hides the file tree for the full width.
-Neither is worth making the default — both are one keystroke, and the tree is
-the reason to use diffnav in the first place.
+The bigger lever is the view itself, so `config.yml` sets **unified** rather
+than diffnav's side-by-side default. Side-by-side splits the width in two
+*and* spends a blank row opposite every insertion; on a monorepo diff of
+deeply indented C# and long JSON lines that leaves very little of either line
+readable. **`s`** toggles back for a rewrite that needs reading in parallel,
+and **`e`** hides the file tree for the full width.
+
+Note that a tab-indented file is the only thing `tabs` reaches. Most of the
+leading whitespace in a C# or JSON diff is literal spaces in the source — four
+per level — and nothing in delta or diffnav will narrow that.
 
 `esc` closes diffnav too, but that one is a translation rather than a setting:
 diffnav quits on `q` and its config file has no key bindings in it, so kitty

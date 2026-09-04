@@ -6,8 +6,10 @@
 # the diff body -- tab width, the box around hunk headers -- belongs to delta
 # and lives in the [delta] section of the global git config instead.
 #
-# The density controls that matter are keys, not settings: `s` toggles
-# unified (full width, no filler rows opposite an insertion), `e` hides the
-# file tree, `?` lists the rest.
+# Unified rather than side-by-side: side-by-side splits the width in two and
+# spends a blank row opposite every insertion, which on a monorepo diff of
+# deeply indented C# and long JSON lines leaves very little of either line
+# visible. `s` toggles back for the times a rewrite needs reading in parallel.
 ui:
   hideHeader: true
+  sideBySide: false
