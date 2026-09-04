@@ -189,11 +189,18 @@ is the line that tells you *where* you are (`3: namespace Models`) — two rows
 back per hunk, and a busy file has a lot of hunks.
 
 `~/.config/diffnav/config.yml` hides the `DIFFNAV` banner, the one row of the
-frame that carries no information. The rest of the frame is not configurable:
-the breadcrumb, the search prompt and the box around each file header are
-hardcoded, and that last one is passed to delta on the command line where a
-config file cannot reach it. Measured on one file with one hunk, the frame
-above the first line of code goes from 14 rows to 11.
+frame that carries no information. The breadcrumb and the search prompt are
+hardcoded and stay.
+
+The box around each **file** heading takes a wrapper. diffnav passes
+`--file-decoration-style=box` on delta's own command line, and a command-line
+flag beats every config file, so `~/.local/libexec/kdiff/delta` substitutes
+the value in flight — delta rejects a repeated flag, so it cannot simply be
+appended. `kdiff` puts that directory first on `PATH` for its diffnav
+pipeline and nowhere else, and hands it the resolved path to the real delta;
+run any other way the wrapper refuses. Plain `delta`, lazygit's pager and
+`git difftool` all still get Homebrew's binary. Three rows per file heading
+become one.
 
 The bigger lever is the view itself, so `config.yml` sets **unified** rather
 than diffnav's side-by-side default. Side-by-side splits the width in two

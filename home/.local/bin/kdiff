@@ -111,6 +111,16 @@ if [ "$viewer" = diffnav ]; then
   # -w/-t paths already get this title from `launch --title`; this covers the
   # ones that run here, including CMD+SHIFT+G's own OS window.
   printf '\033]2;diff: %s\007' "$(basename "$(git rev-parse --show-toplevel)")"
+
+  # See libexec/kdiff/delta: it unboxes the file headings by rewriting one of
+  # diffnav's own delta arguments. Scoped to this pipeline -- nothing else on
+  # the machine resolves `delta` through it.
+  shim="$HOME/.local/libexec/kdiff"
+  if [ -x "$shim/delta" ] && KDIFF_DELTA="$(command -v delta)"; then
+    export KDIFF_DELTA
+    PATH="$shim:$PATH"
+  fi
+
   git diff "$@" | diffnav
   exit "${PIPESTATUS[0]}"
 fi

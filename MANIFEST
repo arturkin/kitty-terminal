@@ -48,3 +48,6 @@
 .local/bin/wt-ide
 .local/bin/wt-link
 .local/bin/phpstorm
+
+# kdiff runs diffnav with this first on PATH; see the script for why.
+.local/libexec/kdiff/

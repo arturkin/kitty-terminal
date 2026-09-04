@@ -1,0 +1,23 @@
+#!/bin/sh
+# Not a general delta. kdiff puts this directory first on PATH for its diffnav
+# pipeline and nowhere else, so that this can edit one argument in flight.
+#
+# diffnav hardcodes --file-decoration-style=box on delta's command line, and a
+# command-line flag beats every config file, so the box drawn around each file
+# heading -- three rows where one would do, times every file in the diff -- is
+# not reachable any other way. delta rejects a repeated flag, so the value has
+# to be substituted rather than appended.
+#
+# kdiff resolves the real delta and passes it in; without that this would find
+# itself on PATH and loop.
+[ -n "${KDIFF_DELTA:-}" ] || { echo "kdiff: delta shim called outside kdiff" >&2; exit 127; }
+
+for a in "$@"; do
+  case "$a" in
+    --file-decoration-style=*) set -- "$@" --file-decoration-style=none ;;
+    *) set -- "$@" "$a" ;;
+  esac
+  shift
+done
+
+exec "$KDIFF_DELTA" "$@"
