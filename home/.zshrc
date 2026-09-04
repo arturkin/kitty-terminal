@@ -10,7 +10,7 @@ export NVM_DIR="$HOME/.nvm"
 # bun
 export BUN_INSTALL="$HOME/.bun"
 export PATH="$BUN_INSTALL/bin:$PATH:$HOME/bin"
-eval "$(/opt/homebrew/bin/brew shellenv)"
+[ -x /opt/homebrew/bin/brew ] && eval "$(/opt/homebrew/bin/brew shellenv)"
 # The next line updates PATH for the Google Cloud SDK.
 if [ -f "$HOME/Downloads/google-cloud-sdk/path.zsh.inc" ]; then . "$HOME/Downloads/google-cloud-sdk/path.zsh.inc"; fi
 
@@ -22,9 +22,11 @@ export GOPATH=$HOME/go
 export PATH=$PATH:$GOPATH/bin
 
 
-#gcloud
-source "/opt/homebrew/Caskroom/google-cloud-sdk/latest/google-cloud-sdk/path.zsh.inc"
-source "/opt/homebrew/Caskroom/google-cloud-sdk/latest/google-cloud-sdk/completion.zsh.inc"
+#gcloud (brew cask). Guarded: a machine without the cask must still get a prompt.
+_gcsdk="/opt/homebrew/Caskroom/google-cloud-sdk/latest/google-cloud-sdk"
+[ -f "$_gcsdk/path.zsh.inc" ] && source "$_gcsdk/path.zsh.inc"
+[ -f "$_gcsdk/completion.zsh.inc" ] && source "$_gcsdk/completion.zsh.inc"
+unset _gcsdk
 export GOOGLE_CLOUD_PROJECT="prod-ts"
 #export PATH="$(brew --prefix)/opt/curl/bin:$PATH"
 export PATH="$HOME/.local/bin:$PATH"

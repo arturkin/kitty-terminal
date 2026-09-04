@@ -1,3 +1,8 @@
 #!/usr/bin/env bash
-# PhpStorm is a standalone (non-Toolbox) install; mirror the Toolbox launcher shape.
-exec open -na "/Applications/PhpStorm.app" --args "$@"
+# PhpStorm launcher, same shape as the JetBrains Toolbox script.
+# Standalone installs land in /Applications, Toolbox ones in ~/Applications.
+for app in "/Applications/PhpStorm.app" "$HOME/Applications/PhpStorm.app"; do
+  [ -d "$app" ] && exec open -na "$app" --args "$@"
+done
+echo "phpstorm: PhpStorm.app not found in /Applications or ~/Applications" >&2
+exit 127

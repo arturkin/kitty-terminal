@@ -725,7 +725,8 @@ So `~/Work/guide` opens PhpStorm, `~/Work/monorepo` opens WebStorm. `⌥I` flips
 ~/.config/kitty/workmux_watcher.py  repaint + auto-clear on focus
 ~/.config/kitty/session_watcher.py  rolling session snapshots
 ~/.config/kitty/open-actions.conf   what CMD+click does with a link
-~/.config/kitty/local.d/*.conf      your overrides, loaded last
+~/.config/kitty/notifications.py    caps how long any notification lives
+~/.config/kitty/local.d/*.conf      your overrides, loaded last (not backed up)
 ~/.config/workmux/config.yaml       agent, rebase merges, post_create → wt-link
 ~/.local/bin/wt-link                worktree seeding
 ~/.local/bin/wt-ide                 IDE detection + launch
@@ -737,7 +738,12 @@ So `~/Work/guide` opens PhpStorm, `~/Work/monorepo` opens WebStorm. `⌥I` flips
 ~/.config/wt/images.zsh             icat / ilast / iclear
 ~/.claude/hooks/kitty-notify.py     agent notifications (Claude Code hooks)
 ~/.config/wt/shell.zsh              the `wt` function - worktree in this pane
-~/.local/bin/{webstorm,phpstorm}    launchers
+~/.local/bin/{webstorm,phpstorm}    IDE launchers (Toolbox or /Applications)
+~/.config/lazygit/config.yml        theme, delta as the diff renderer, ESC quits
+~/.config/diffnav/config.yml        banner off, unified by default
+~/.claude/settings.json             permissions, hooks, plugins, status line
+~/.claude/skills/                   skills, plus the lsp plugin (see above)
+~/.claude/statusline.sh             the status line
 ~/.zshrc                            the CLAUDE_CODE_* strip
 ~/.claude/commands/*.md             the slash commands
 ```
@@ -768,15 +774,47 @@ defeat its purpose and `install` would delete another machine's overrides.
 diff` to see what you changed, commit, push. Export is not automatic — until you
 run it, the repo is stale. `./sync status` tells you whether it is.
 
-**On a new machine.** Install kitty, workmux, Claude Code, `gh` (`brew install
-gh` — the credential step below needs it, and so does the `open-pr` skill) and
-`diffnav` (`brew install diffnav`, optional — `kdiff` falls back without it)
-and `lazygit` (`brew install lazygit` — `F3`), then:
+**On a new machine.** In order:
 
-```
+```bash
+# 1. Homebrew, then everything this setup takes from it (Brewfile at the root)
 git clone https://github.com/arturkin/kitty-terminal.git ~/Work/terminal
-cd ~/Work/terminal && ./sync install
+cd ~/Work/terminal && brew bundle
+
+# 2. the configs themselves
+./sync install
+
+# 3. Claude Code (native install; lands in ~/.local/bin, which .zshrc has on PATH)
+curl -fsSL https://claude.ai/install.sh | bash
+
+# 4. node via nvm, then the language servers the lsp plugin expects on PATH
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/master/install.sh | bash
+nvm install 24 && npm i -g typescript typescript-language-server intelephense \
+  pyright bash-language-server vscode-langservers-extracted \
+  some-sass-language-server graphql-language-service-cli
+go install golang.org/x/tools/gopls@latest
+dotnet tool install -g csharp-ls          # needs a .NET SDK; DOTNET_ROOT is set in .zshrc
+
+# 5. credentials and IDE
+gh auth login
 ```
+
+What each step is for: `kitty` and `workmux` are the terminal and the worktree
+manager; `lazygit` is `F3`; `git-delta` renders every diff body (lazygit's
+diff pane prints `delta: command not found` without it); `diffnav` is the
+file tree behind `kdiff` and is the one optional item — `kdiff` falls back to
+`kitten diff`; `gh` is how git authenticates; `jq` is parsed by every Claude
+Code hook and the status line, so without it the sensitive-files guard and
+the `git push` confirmation silently stop firing. WebStorm and PhpStorm are
+found in `~/Applications` (Toolbox) or `/Applications`, whichever exists.
+`sourcekit-lsp` ships with Xcode's command line tools. Monaco is a system
+font. `python3` is used by `kitty-session`, `kjobs` and the notify hook and
+comes with the command line tools too.
+
+Claude Code plugins (`superpowers`, `workmux-status`, the PhpStorm plugin)
+reinstall themselves from `enabledPlugins` and `extraKnownMarketplaces` in
+`settings.json` on first launch. The MCP servers are printed as
+`claude mcp add-json` lines at the end of `./sync install`.
 
 Anything it would have overwritten is moved to `~/.config-backup-<timestamp>/`
 first, and it prints where. Directory entries (`kitty/`, `wt/`, `commands/`,
@@ -794,7 +832,7 @@ when it finishes:
 `export` refuses to finish if it finds a GitHub/AWS/Slack/Anthropic token or a
 private key anywhere under `home/`.
 
-One file still hardcodes this machine's username: `settings.json`, in 29 places
+One file still hardcodes this machine's username: `settings.json`, in about 30 places
 — 22 `Read(...)` deny rules, six one-off `Bash(...)` allow entries left over
 from past sessions, and one `autoMode` note. A restore under a different
 username needs a pass over that file. The deny rules are the part that matters,

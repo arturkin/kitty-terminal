@@ -207,12 +207,13 @@ cmd_status() {
   local e src dst clean=1
   while read -r e; do
     src="$TARGET/$e"; dst="$MIRROR/$e"
-    if ! diff -rq --exclude=.DS_Store --exclude=__pycache__ \
+    # Same exclusions as export, or status would report local.d/ forever.
+    if ! diff -rq --exclude=.DS_Store --exclude=__pycache__ --exclude=local.d \
          "${src%/}" "${dst%/}" >/dev/null 2>&1; then
       printf '%sdiffers%s %s\n' "$Y" "$N" "$e"
       # `|| true`: diff exits non-zero by design here, and pipefail + set -e
       # would abort the loop after the first differing entry.
-      { diff -rq --exclude=.DS_Store --exclude=__pycache__ \
+      { diff -rq --exclude=.DS_Store --exclude=__pycache__ --exclude=local.d \
           "${src%/}" "${dst%/}" 2>&1 || true; } | sed 's/^/    /'
       clean=0
     fi

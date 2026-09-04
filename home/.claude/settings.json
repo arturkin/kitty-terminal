@@ -83,13 +83,13 @@
       "Bash(yarn lint *)",
       "Bash(go vet *)"
     ],
+    "deny": [],
     "ask": [
       "Bash(git push:*)"
     ],
-    "defaultMode": "auto",
-    "deny": []
+    "defaultMode": "auto"
   },
-  "model": "opus",
+  "model": "fable",
   "hooks": {
     "PreToolUse": [
       {
@@ -175,15 +175,18 @@
   "modelSettings": {
     "claude-fable-5": {
       "effortLevel": "medium"
+    },
+    "claude-fable-5-1": {
+      "effortLevel": "medium"
     }
   },
   "tui": "default",
   "skipWorkflowUsageWarning": true,
   "editorMode": "normal",
+  "preferredNotifChannel": "notifications_disabled",
   "autoContinueAtUsageLimit": false,
   "remoteControlAtStartup": false,
   "agentPushNotifEnabled": true,
-  "preferredNotifChannel": "notifications_disabled",
   "skipAutoPermissionPrompt": true,
   "autoMode": {
     "soft_deny": [

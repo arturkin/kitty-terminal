@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# WebStorm launcher, same shape as the JetBrains Toolbox script it replaces.
+# Toolbox installs under ~/Applications, a standalone install under
+# /Applications; whichever exists is used.
+for app in "$HOME/Applications/WebStorm.app" "/Applications/WebStorm.app"; do
+  [ -d "$app" ] && exec open -na "$app" --args "$@"
+done
+echo "webstorm: WebStorm.app not found in ~/Applications or /Applications" >&2
+exit 127
