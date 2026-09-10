@@ -483,9 +483,12 @@ time-wasting thing to rediscover later.
 **Only `${CLAUDE_PROJECT_DIR}` and `${CLAUDE_PLUGIN_ROOT}` expand.** Nothing
 else does. `${HOME}` in a config value is passed through verbatim, and the
 server then creates a directory *literally called* `${HOME}` next to whatever
-it is working on. That is why `intelephense` still indexes to
-`/tmp/intelephense`, and why anything needing a real `$HOME` path goes through
-a wrapper script in `bin/` instead.
+it is working on. Both expand inside `initializationOptions` too, not only in
+`command` and `args` — which is what lets `intelephense` index to
+`${CLAUDE_PLUGIN_ROOT}/../../../.cache/claude-lsp/intelephense`, an ugly way to
+spell `~/.cache/claude-lsp` and the only one available. Anything needing a real
+`$HOME` path somewhere that is *not* a config value goes through a wrapper
+script in `bin/` instead.
 
 **Servers spawn lazily and die with their session.** A session in the
 monorepo that made no LSP call spawned zero servers — confirmed. Cost is one
@@ -504,6 +507,27 @@ on a cold session means a confidently wrong hover — a const whose real type
 is `TravelshiftCustomHeader.DEBUG` came back as `any`, and was still `any`
 three seconds in. `useSyntaxServer: "never"` trades a ~6s first hover for a
 true one. An agent has no way to tell a cold answer from a settled one.
+
+**PHP had the same disease, worse.** intelephense answers the first query of a
+cold session out of a half-built index — not an error, not an honest empty
+match, but a confident `0 results` while it works through the repo. Measured in
+`guide` (~8000 PHP files): `workspaceSymbol("Controller")` returned `0` cold and
+`99` against a built index, and an agent that gets nothing back concludes the
+server is useless there and greps for the rest of the session. That is what
+"PHP LSP is never used" turned out to be — not switched off, lying.
+`bin/intelephense-launch` holds the first request until the server's own
+`indexingEnded` notification arrives. `lsp-settle` cannot cover this: it waits a
+fixed number of milliseconds and only for `textDocument/*`, while the request
+that gets burned is `workspace/symbol`, and no fixed delay covers a first index
+of a large repo. A warm index may announce nothing at all, so a request that has
+waited 2s without seeing `indexingStarted` is let through, and a 180s cap bounds
+the pathological case.
+
+**The PHP index is kept out of `/tmp`**, which macOS sweeps — a sweep used to put
+intelephense back to answering `0` on the next session, so it never stayed
+fixed for long. It lives beside the generated `go.work` in `~/.cache/claude-lsp/`
+now. Cold indexing costs about 15s once per repo: the same probe runs 38s cold
+and 22s warm, and most of that 22s is Claude Code starting up, not the server.
 
 **Go needs a generated `go.work`**, built fresh under `~/.cache/claude-lsp/`
 because the monorepo has 7 modules and no workspace file of its own. It lives

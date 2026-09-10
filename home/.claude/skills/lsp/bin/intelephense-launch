@@ -1,0 +1,115 @@
+#!/usr/bin/env node
+// intelephense, held back until it has finished indexing.
+//
+// Claude Code sends its first query straight after `initialized`, and
+// intelephense answers it from an index that is still being built -- not an
+// error, not an empty-because-nothing-matched, but a confident `0 results`
+// while it works through the repo. The guide repo is ~8000 PHP files, so the
+// first PHP question of a cold session is always a lie, and an agent that
+// gets nothing back concludes the server is useless here and greps for the
+// rest of the session. Measured: cold `workspaceSymbol("Controller")`
+// returns 0, the same query against a built index returns 99.
+//
+// `lsp-settle` cannot cover this. It holds by a fixed number of milliseconds
+// and only for `textDocument/*`, while the request that gets burned here is
+// `workspace/symbol`, and no fixed delay covers a first index of a large
+// repo. So this waits on the server's own signal instead: intelephense
+// announces `indexingStarted` and `indexingEnded`, and the first request is
+// released when indexing ends rather than after some guessed interval.
+//
+// A warm index may never announce anything at all, so a request that has
+// waited GRACE_MS without seeing `indexingStarted` is let through -- there is
+// nothing to wait for. CAP_MS then bounds the pathological case: better a
+// slow answer than a wrong one, but not an unbounded one.
+'use strict';
+const { spawn } = require('child_process');
+
+const GRACE_MS = 2000;    // no indexingStarted by now: the server is idle
+const CAP_MS = 180000;    // an index that never ends must not hang the tool
+
+const child = spawn('intelephense', ['--stdio'], {
+  stdio: ['pipe', 'pipe', 'inherit'],
+});
+child.on('error', e => {
+  process.stderr.write('intelephense-launch: ' + e.message + '\n');
+  process.exit(127);
+});
+child.on('exit', (code, sig) => process.exit(sig ? 1 : code === null ? 1 : code));
+
+let indexing = false;     // indexingStarted seen, indexingEnded not yet
+let settled = false;      // indexing has finished, or there was none to wait for
+let released = false;     // the one-shot hold has been spent
+const waiters = [];
+
+function settle() {
+  if (settled) return;
+  settled = true;
+  while (waiters.length) waiters.shift()();
+}
+
+// -- server -> client: forwarded verbatim, and watched for the two signals --
+// Forwarding is byte-for-byte rather than reframed, so a marker split across
+// two chunks is caught by keeping the tail of the previous one.
+let tail = '';
+child.stdout.on('data', chunk => {
+  process.stdout.write(chunk);
+  const text = tail + chunk.toString('utf8');
+  if (text.includes('"indexingStarted"')) indexing = true;
+  if (text.includes('"indexingEnded"')) { indexing = false; settle(); }
+  tail = text.slice(-64);
+});
+
+// -- client -> server: the first real request waits for the signal ----------
+let queue = Promise.resolve();
+let buf = Buffer.alloc(0);
+
+function forward(chunk, hold) {
+  queue = queue.then(() => new Promise(resolve => {
+    if (!hold) { child.stdin.write(chunk); return resolve(); }
+    const go = () => { child.stdin.write(chunk); resolve(); };
+    if (settled) return go();
+    let done = false;
+    const once = () => { if (!done) { done = true; go(); } };
+    waiters.push(once);
+    const cap = setTimeout(once, CAP_MS);
+    // Nothing has started indexing and nothing is going to: stop waiting.
+    setTimeout(() => { if (!indexing) { clearTimeout(cap); once(); } }, GRACE_MS);
+  }));
+}
+
+process.stdin.on('data', chunk => {
+  buf = Buffer.concat([buf, chunk]);
+  for (;;) {
+    const sep = buf.indexOf('\r\n\r\n');
+    if (sep < 0) break;
+    const m = /content-length:\s*(\d+)/i.exec(buf.slice(0, sep).toString('ascii'));
+    // Unparseable framing is not ours to repair: hand it over untouched.
+    if (!m) { forward(buf.slice(0, sep + 4), false); buf = buf.slice(sep + 4); continue; }
+    const len = parseInt(m[1], 10);
+    if (buf.length < sep + 4 + len) break;
+    const frame = buf.slice(0, sep + 4 + len);
+    buf = buf.slice(sep + 4 + len);
+
+    let msg = null;
+    try { msg = JSON.parse(frame.slice(sep + 4).toString('utf8')); } catch {}
+
+    // Our answer to something the server asked us. It must never queue behind
+    // a held request: the server can be waiting on it to finish starting up.
+    if (msg && msg.id !== undefined && msg.method === undefined) {
+      child.stdin.write(frame);
+      continue;
+    }
+
+    // `initialize` is what starts the indexing we are waiting on, so it can
+    // never be the thing that waits. The first request after it is.
+    const isRequest = msg && msg.id !== undefined && typeof msg.method === 'string';
+    let hold = false;
+    if (!released && isRequest && msg.method !== 'initialize') {
+      released = true;
+      hold = true;
+    }
+    forward(frame, hold);
+  }
+});
+
+process.stdin.on('end', () => { queue.then(() => child.stdin.end()); });

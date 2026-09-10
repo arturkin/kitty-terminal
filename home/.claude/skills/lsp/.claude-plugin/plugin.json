@@ -35,12 +35,11 @@
       "extensionToLanguage": { ".swift": "swift" }
     },
     "intelephense": {
-      "command": "intelephense",
-      "args": ["--stdio"],
+      "command": "${CLAUDE_PLUGIN_ROOT}/bin/intelephense-launch",
       "workspaceFolder": "${CLAUDE_PROJECT_DIR}",
       "initializationOptions": {
-        "storagePath": "/tmp/intelephense",
-        "globalStoragePath": "/tmp/intelephense-global"
+        "storagePath": "${CLAUDE_PLUGIN_ROOT}/../../../.cache/claude-lsp/intelephense",
+        "globalStoragePath": "${CLAUDE_PLUGIN_ROOT}/../../../.cache/claude-lsp/intelephense-global"
       },
       "settings": {
         "intelephense": {
