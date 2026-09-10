@@ -244,6 +244,7 @@ enter           drill into a file, then space stages one hunk or line
 a               stage everything
 c               commit          n   new branch (in Branches)
 f / p / P       fetch / pull / push
+ctrl+p          where P would push, and the commits it would send
 r               rebase onto the selected branch      s   stash
 o               open a PR for this branch (uses gh)
 q or esc        close
@@ -260,8 +261,11 @@ stacking a second overlay — and it is a no-op rather than a kill, which matter
 in the middle of a rebase.
 
 The two WebStorm keys are shortcuts into the same two halves. `⌘⇧K` is that
-lazygit again with the file list enlarged against the diff rather than the
-four-panel dashboard — the commit dialog, one `c` and one `P` from pushed.
+lazygit again, on the key WebStorm puts Commit on — one `c` and one `P` from
+pushed. It used to open with `--screen-mode half`, which draws the focused
+panel and nothing else: no branch, no commits, no sign of where a push would
+land. Now it opens the same four panels `F3` does, with
+`expandFocusedSidePanel` giving the file list the room instead.
 `⌘⇧T` is Update Project, and it runs `kpull`:
 
 ```
@@ -281,12 +285,38 @@ kitty resolves `lazygit` itself, but lazygit then cannot find `delta`, and the
 diff pane renders `delta: command not found`. `kdiff` and `kpull` carry the
 same fixup inside the scripts.
 
-Two deliberate config choices in `~/.config/lazygit/config.yml`: diffs render
-through `delta`, so they look the same here as in `git diff` and `kdiff`; and
-Nerd Font icons are **off**, because `font_family` is Monaco and asking for
-glyphs it does not have renders tofu boxes. Everything else is left at
-lazygit's defaults, so upgrades keep bringing new ones — note that lazygit
-rewrites the file in place when it renames a setting.
+### Seeing what you are about to push
+
+Everything a push depends on is on screen without pressing anything. **Status**
+reads `↑3 repo → branch`; **Local branches** repeats the `↑3` and adds `↓n` for
+how far the branch has fallen behind the trunk it was cut from; in **Commits**,
+an unpushed commit's hash is **red**, a pushed one's **yellow**, and one already
+merged into the trunk **green** — so the red run at the top is exactly what `P`
+would send.
+
+The one thing lazygit will not print in this view is the upstream's *name*: it
+only appears in the branches panel in half or full screen mode, which is the
+mode that hides everything else. `ctrl+p` fills that gap — a popup with the
+target ref and `git log @{u}..HEAD`:
+
+```
+╭─Push──────────────────────────────────────╮
+│Pushing to origin/my-feature               │
+│                                           │
+│4c222a2 (HEAD -> my-feature) third commit  │
+╰───────────────────────────────────────────╯
+```
+
+`mainBranches` carries `development` alongside `master` and `main`, or lazygit
+finds no trunk in the guide repo and both the `↓n` arrow and the green
+merged-commit colour go quiet.
+
+The rest of `~/.config/lazygit/config.yml`: diffs render through `delta`, so
+they look the same here as in `git diff` and `kdiff`; and Nerd Font icons are
+**off**, because `font_family` is Monaco and asking for glyphs it does not have
+renders tofu boxes. Everything else is left at lazygit's defaults, so upgrades
+keep bringing new ones — note that lazygit rewrites the file in place when it
+renames a setting.
 
 ## What is running
 
@@ -624,6 +654,22 @@ workmux remove my-feature       # drop it without merging
 
 Worktrees land in `../<project>__worktrees/<name>`.
 
+### Every worktree starts from an up-to-date trunk
+
+Whatever branch you are standing on, a new worktree is cut from the repo's
+**default branch, freshly fetched** — `development` in the guide repo, `main`
+or `master` elsewhere, read off `origin/HEAD` rather than guessed.
+
+`wt` fetches that branch, then hands workmux `--base origin/<branch>`. It also
+carries the local copy of that branch forward, so the checkout you came from
+does not sit behind the worktree just cut from it — a fast-forward only, so a
+trunk with commits of its own is left alone, and so is one that is checked out
+and dirty.
+
+`workmux add` on its own does not fetch (`base_branch: auto` in
+`~/.config/workmux/config.yaml` reads local refs only), so a tab worktree is
+only as current as your last fetch. `wt` is the one that goes to the network.
+
 ### Four worktrees in the four panes: `wt`
 
 `workmux add` always opens a **new tab** — one worktree, one tab, that's its
@@ -637,8 +683,8 @@ wt -l                               # list worktrees (tab-completion works too)
 ```
 
 Four panes, four worktrees, one tab. `wt` still lets workmux create the
-worktree — so naming, base branch and the `wt-link` seeding are identical — it
-just closes the tab workmux insists on and runs the agent here.
+worktree — so naming and the `wt-link` seeding are identical — it just closes
+the tab workmux insists on, fetches the trunk first, and runs the agent here.
 
 The agent is tracked by **pane**, so a `wt` worktree shows up in
 `workmux dashboard` exactly like a tab one, and `ls` / `merge` / `remove` work
@@ -739,7 +785,8 @@ So `~/Work/guide` opens PhpStorm, `~/Work/monorepo` opens WebStorm. `⌥I` flips
 ~/.claude/hooks/kitty-notify.py     agent notifications (Claude Code hooks)
 ~/.config/wt/shell.zsh              the `wt` function - worktree in this pane
 ~/.local/bin/{webstorm,phpstorm}    IDE launchers (Toolbox or /Applications)
-~/.config/lazygit/config.yml        theme, delta as the diff renderer, ESC quits
+~/.config/lazygit/config.yml        theme, delta as the diff renderer, ESC quits,
+                                    CTRL+P push preview
 ~/.config/diffnav/config.yml        banner off, unified by default
 ~/.claude/settings.json             permissions, hooks, plugins, status line
 ~/.claude/skills/                   skills, plus the lsp plugin (see above)

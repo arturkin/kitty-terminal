@@ -17,6 +17,17 @@ gui:
   # The command log teaches you the git behind each keypress, then becomes
   # noise. The bottom line stays: it is where the keybindings are.
   showCommandLog: false
+  # Give the focused panel the room a big file list needs without collapsing
+  # the other three, which is what `--screen-mode half` used to do. Status,
+  # Branches and Commits stay on screen, so the push target and the commits
+  # ahead of it are always in view. `expandedSidePanelWeight` is the dial.
+  expandFocusedSidePanel: true
+  expandedSidePanelWeight: 2
+  # A panel no taller than its contents; the slack goes to the panels that
+  # have something to show, usually Commits.
+  shrinkSidePanelsToContent: true
+  # How far each branch has fallen behind the branch it was cut from.
+  showDivergenceFromBaseBranch: arrowAndNumber
 
 git:
   # delta is already installed and used for git itself, so diffs look the same
@@ -24,6 +35,30 @@ git:
   diffRenderers:
     - colorArg: always
       command: delta --dark --paging=never
+
+  # lazygit ships [master, main]. The guide repo's trunk is `development`, and
+  # without it there lazygit has no base branch: no divergence arrow, and every
+  # merged commit keeps its unmerged colour.
+  mainBranches:
+    - master
+    - main
+    - development
+
+# CTRL+P: the one thing the panels cannot say, which is the upstream's name.
+# Everything else about a push is already on screen -- Status and Branches
+# carry the ahead count, and an unpushed commit's hash is red in Commits.
+customCommands:
+  - key: '<c-p>'
+    context: 'global'
+    description: 'Show the push target and the commits it would send'
+    output: popup
+    outputTitle: 'Push'
+    command: >-
+      sh -c 'up=$(git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null)
+      || { echo "No upstream yet: P pushes this branch to origin and sets one."; exit 0; };
+      echo "Pushing to $up"; echo;
+      git --no-pager log --oneline --decorate "$up"..HEAD
+      || echo "(nothing to push)"'
 
 # ESC quits when nothing is open to back out of. Inside a menu, a panel or a
 # diff it still means "return", which is what lazygit uses <esc> for -- this

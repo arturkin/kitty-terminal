@@ -5,6 +5,11 @@ agent: claude
 merge_strategy: rebase
 worktree_naming: basename
 
+# Branch new worktrees off the repo's default branch, not whatever happens to
+# be checked out. `auto` reads local refs only -- it never fetches -- so `wt`
+# fetches that branch itself before handing workmux an explicit --base.
+base_branch: auto
+
 # Seeds .idea + every gitignored node_modules/vendor/.env from the main
 # checkout. Owns all file seeding, so there is no `files:` block here.
 post_create:
