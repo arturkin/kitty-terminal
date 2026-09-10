@@ -325,20 +325,22 @@ renames a setting.
 is costing, and a way to kill it:
 
 ```
- Running (10)  ·  21% cpu  ·  2.3G             2 agents  ·  sort: tab
+ Running (13)  ·  21% cpu  ·  4.4G   1 detached  ·  2 agents  ·  sort: tab
 
-  yarn dev · pane 1   ▾ yarn dev                  43m     ·   893M  ~/…/js/web
-                        └ nodemon.js              43m     ·    13M  ~/…/js/web
-                          └ node --max_old_spa…   43m   10%   865M  ~/…/js/web
-  main · pane 1       ▾ claude ✳ Ancient otter…    1d   10%   1.3G  ~/…/ab-car-widget
-                        └ npm exec chrome-devt…    1d     ·     7M  ~/…/ab-car-widget
-                          └ chrome-devtools-mcp    1d     ·    22M  ~/…/ab-car-widget
-                        └ caffeinate -i -t 300     1m     ·     1M  ~/…/ab-car-widget
-  main · pane 2       ▾ claude ✳ Export and re…   23h  2.4%   190M  ~/Work/terminal
-                        └ sh ./run_main.sh        24m     ·   800K  ~/Work/terminal
-                          └ python http_run.py…   10m  1.7%    27M  ~/Work/terminal
-                        └ tail -f -n 0 main-ru…   19m     ·   368K  ~/Work/terminal
-                        └ intelephense --stdio    47m     ·    43M  ~/Work/terminal
+  yarn dev · pane 1   ▾ yarn dev                  43m     ·   893M          ~/…/js/web
+                        └ nodemon.js              43m     ·    13M          ~/…/js/web
+                          └ node --max_old_spa…   43m   10%   865M   :3000  ~/…/js/web
+  main · pane 1       ▾ claude ✳ Ancient otter…    1d   10%   1.3G          ~/…/ab-car-widget
+                        └ npm exec chrome-devt…    1d     ·     7M          ~/…/ab-car-widget
+                          └ chrome-devtools-mcp    1d     ·    22M          ~/…/ab-car-widget
+                        └ caffeinate -i -t 300     1m     ·     1M          ~/…/ab-car-widget
+  main · pane 2       ▾ claude ✳ Export and re…   23h  2.4%   190M          ~/Work/terminal
+                        └ sh ./run_main.sh        24m     ·   800K          ~/Work/terminal
+                          └ python http_run.py…   10m  1.7%    27M          ~/Work/terminal
+                        └ tail -f -n 0 main-ru…   19m     ·   368K          ~/Work/terminal
+                        └ intelephense --stdio    47m     ·    43M          ~/Work/terminal
+  ⌁ main · pane 3       yarn dev                   3h     ·   180M   :3005  ~/…/car-new-tab/web
+  ⌁ background        ▸ 5 daemons                  6d  1.2%   2.1G     :53
 ```
 
 `j`/`k` move, `space` marks, `tab` folds a row's children away, `s` cycles the
@@ -417,6 +419,37 @@ stacked on, because they are running something too. The F2 list is the exception
 it leaves itself and its own shell out. kitty does not report which window of a
 pane is the base one (it reorders them as they are focused), so nothing here
 tries to guess — every window of a pane is walked, and they share its number.
+
+**A job that outlived its pane is still listed**, as the amber `⌁` rows at the
+bottom. When the shell that started a dev server exits — a worktree removed
+underneath it, a Claude Code session closed, a pane killed — launchd adopts what
+it left running. The job keeps its port, its memory and its CPU, but it is no
+longer under any pane, so walking down from the panes can never find it again.
+That is precisely how a `yarn dev` runs for a day unnoticed.
+
+kitty cannot help here, but the process itself can: it still carries the
+`KITTY_PID` and `KITTY_WINDOW_ID` it inherited when it was launched, because a
+process keeps its environment when its parent dies. So the tops of everything no
+pane accounts for are checked against this kitty's PID, and the ones that match
+are listed under the pane they came from — `⌁ main · pane 3` — or as plain
+`⌁ detached` once that pane is gone too. `↵` still focuses the pane when there is
+one. Reading environments is the most expensive thing here and none of them can
+change, so each PID is only ever read once.
+
+**Services meant to outlive their pane arrive folded**, behind one
+`⌁ background` row: colima, `limactl`, a database, a docker VM. They are
+detached by design, they never stop being detached, and a permanent five rows of
+them would bury the one thing you opened the list to find. Their CPU and memory
+still count in the header, `tab` opens them, and each one inside kills
+individually — the fold itself is a heading and cannot be marked or signalled.
+`DAEMONS` in the script is the list; add to it when a new one starts nagging.
+
+**The port column appears when something is listening**, and only then — it is
+`lsof` per refresh, and a list with nothing serving should not pay a column for
+it. A job row carries any port opened anywhere beneath it, so `yarn dev` shows
+the one its `nodemon` actually opened rather than nothing at all; `:3005+2`
+means three ports, the lowest shown. This is what tells a forgotten dev server
+apart from a build that is merely slow.
 
 One kitty instance is one list: `listen_on` is per kitty PID, so a second kitty
 app has its own.

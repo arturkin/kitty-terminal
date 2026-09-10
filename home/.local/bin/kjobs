@@ -10,6 +10,11 @@ the agent currently has running. Shells that only stand in front of a command
 are walked through rather than listed. CPU and memory on a job row cover its
 whole subtree, which is what a kill takes down.
 
+A job whose parent dies is adopted by launchd and leaves every pane's tree
+while still running -- a dev server whose shell exited, still holding its
+port. Its environment still names the kitty and the window it came from, so
+it is found that way and listed as detached rather than lost entirely.
+
     kjobs            the picker (bound to F2 in kitty.conf)
     kjobs --json     the same rows as JSON, for scripts and verification
 
@@ -33,16 +38,29 @@ from glob import glob
 PLUMBING = {'login', 'kitten', 'kitty'}
 SHELLS = {'zsh', 'bash', 'sh', 'fish', 'dash', 'ksh', 'csh', 'tcsh'}
 AGENTS = {'claude'}
+# Detached services meant to outlive the pane that started them. Worth
+# counting, not worth a row each, so they arrive folded behind one row.
+DAEMONS = {'colima', 'limactl', 'lima', 'dockerd', 'docker', 'podman',
+           'qemu-system-aarch64', 'vfkit', 'ollama', 'redis-server',
+           'postgres', 'mysqld', 'mariadbd', 'mongod', 'elasticsearch'}
 # `node /Users/x/.nvm/versions/node/v24.11.0/bin/yarn dev` is `yarn dev`, and
 # `bash /Users/x/.local/bin/wt-help` is `wt-help`.
 INTERPRETERS = {'node', 'python', 'python3', 'ruby', 'perl', 'bun', 'deno',
                 'sh', 'bash', 'zsh', 'fish'}
 TERM_GRACE = 8.0  # how long a row keeps saying "terminating..."
 SORTS = ('tab', 'cpu', 'mem', 'age')
+DAEMON_PID = -1  # the folded daemon row: a heading, never something to signal
+PORT_W = 7       # ':3005+2'
 
 # pid -> (subtree cpu seconds, wall clock) from the previous sample, which is
 # what turns cumulative CPU time into a percentage over the refresh interval.
 _cpu_prev: dict[int, tuple[float, float]] = {}
+
+# What cannot change while a process lives, so it is only ever asked once:
+# its environment, and -- for a job with no shell left to cd it -- its cwd.
+# Both are pruned to the live process table on every refresh.
+_env_cache: dict[int, tuple[int, int] | None] = {}
+_cwd_cache: dict[int, str] = {}
 
 
 def die(msg: str) -> None:
@@ -78,6 +96,129 @@ def kitty_ls() -> list:
     except subprocess.CalledProcessError as e:
         die(f'kitty @ ls failed: {e.stderr.strip()}')
     return json.loads(out)
+
+
+def kitty_pid() -> int | None:
+    """This kitty's pid -- what a detached job's KITTY_PID has to match."""
+    value = os.environ.get('KITTY_PID')
+    if not value:
+        # listen_on is `unix:/tmp/kitty-{kitty_pid}`, which is how
+        # socket_address found this one in the first place.
+        value = socket_address().rsplit('-', 1)[-1]
+    try:
+        return int(value)
+    except ValueError:
+        return None
+
+
+def kitty_env(pids: list[int]) -> dict[int, tuple[int, int]]:
+    """(KITTY_PID, KITTY_WINDOW_ID) for each of `pids` that carries them.
+
+    Cached per pid, misses included: reading 400 environments costs more than
+    everything else this does put together, and none of them can change.
+    """
+    missing = [pid for pid in pids if pid not in _env_cache]
+    if missing:
+        found = read_kitty_env(missing)
+        for pid in missing:
+            _env_cache[pid] = found.get(pid)
+    return {pid: _env_cache[pid] for pid in pids if _env_cache.get(pid)}
+
+
+def read_kitty_env(pids: list[int]) -> dict[int, tuple[int, int]]:
+    """KITTY_PID and KITTY_WINDOW_ID straight out of each pid's environment.
+
+    A process keeps its environment when its parent dies, so this is all that
+    is left of a detached job's origin once the process tree no longer leads
+    back to a pane. `ps -E` prints the environment after argv, and the last
+    assignment wins, so a value that was only ever an argument cannot shadow
+    the real one.
+    """
+    if not pids:
+        return {}
+    args = ['ps', '-Eww', '-o', 'pid=,args=']
+    for pid in pids:
+        args += ['-p', str(pid)]
+    try:
+        out = subprocess.run(args, capture_output=True, text=True,
+                             timeout=5).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return {}
+    found: dict[int, tuple[int, int]] = {}
+    for line in out.splitlines():
+        head, _, rest = line.strip().partition(' ')
+        try:
+            pid = int(head)
+        except ValueError:
+            continue
+        kitty = window = ''
+        for token in rest.split():
+            name, sep, value = token.partition('=')
+            if sep and name == 'KITTY_PID':
+                kitty = value
+            elif sep and name == 'KITTY_WINDOW_ID':
+                window = value
+        if kitty.isdigit():
+            found[pid] = (int(kitty), int(window) if window.isdigit() else 0)
+    return found
+
+
+def listening_ports() -> dict[int, set[int]]:
+    """pid -> the TCP ports it is listening on; empty if lsof cannot say.
+
+    This is the column that tells a forgotten dev server apart from a build
+    that is merely slow, so it is never allowed to break the list.
+    """
+    try:
+        out = subprocess.run(
+            ['lsof', '-nP', '-iTCP', '-sTCP:LISTEN', '-F', 'pn'],
+            capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return {}
+    ports: dict[int, set[int]] = {}
+    pid = None
+    for line in out.splitlines():
+        if line.startswith('p'):
+            pid = int(line[1:]) if line[1:].isdigit() else None
+        elif line.startswith('n') and pid is not None:
+            # `*:3000`, `127.0.0.1:3000`, `[::1]:3000`.
+            _, sep, tail = line[1:].rpartition(':')
+            if sep and tail.isdigit():
+                ports.setdefault(pid, set()).add(int(tail))
+    return ports
+
+
+def working_dirs(pids: list[int]) -> dict[int, str]:
+    """cwd per pid. kitty reports this for a pane's foreground processes;
+    a detached job has no pane left to ask -- and nothing left to cd it
+    either, which is what makes this safe to cache."""
+    missing = [pid for pid in pids if pid not in _cwd_cache]
+    if missing:
+        found = read_working_dirs(missing)
+        for pid in missing:
+            _cwd_cache[pid] = found.get(pid, '')
+    return {pid: _cwd_cache[pid] for pid in pids}
+
+
+def read_working_dirs(pids: list[int]) -> dict[int, str]:
+    """cwd per pid, from lsof."""
+    if not pids:
+        return {}
+    args = ['lsof', '-a', '-d', 'cwd', '-F', 'n', '-p',
+            ','.join(str(pid) for pid in pids)]
+    try:
+        out = subprocess.run(args, capture_output=True, text=True,
+                             timeout=5).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return {}
+    dirs: dict[int, str] = {}
+    pid = None
+    for line in out.splitlines():
+        if line.startswith('p'):
+            pid = int(line[1:]) if line[1:].isdigit() else None
+        elif line.startswith('n') and pid is not None:
+            dirs[pid] = line[1:]
+    return dirs
 
 
 def clock_seconds(value: str) -> float:
@@ -192,6 +333,19 @@ def ancestors(pid: int, table: dict[int, dict]) -> set[int]:
     return seen
 
 
+def descendants(pid: int, kids: dict[int, list[int]]) -> set[int]:
+    """Every pid below pid, however deep -- what a pane already accounts for."""
+    seen: set[int] = set()
+    stack = list(kids.get(pid, ()))
+    while stack:
+        current = stack.pop()
+        if current in seen:
+            continue
+        seen.add(current)
+        stack.extend(kids.get(current, ()))
+    return seen
+
+
 def topmost_jobs(pid: int, table, kids, depth: int = 0) -> list[dict]:
     """Descend from pid through shells; report the first real commands found."""
     if depth > 12:
@@ -284,15 +438,157 @@ def cpu_percent(pid: int, cpu_seconds: float, now: float, pcpu: float) -> float:
     return max(0.0, (cpu_seconds - prev_cpu) / elapsed * 100)
 
 
+def ports_under(pid: int, below, ports: dict[int, set[int]]) -> list[int]:
+    """Ports listened on by a job or anything under it -- `yarn dev` should
+    carry the port its nodemon opened."""
+    found = set(ports.get(pid, ()))
+    for _, proc in below:
+        found |= ports.get(proc['pid'], set())
+    return sorted(found)
+
+
+def job_row(proc, table, kids, now, ports, *, label, agent, where,
+            window_id=None, shell_pgid=None, tab_label='', pane=0,
+            at_prompt=False, cwd='', fg_cwd=None, detached=False) -> dict:
+    """One top-level row and the tree of real commands nested under it."""
+    fg_cwd = fg_cwd or {}
+    below = subtree(proc['pid'], table, kids)
+    shown = real_tree(proc['pid'], table, kids)
+    cpu_seconds = proc['cpu_seconds'] + sum(p['cpu_seconds'] for _, p in below)
+    rss_kb = proc['rss_kb'] + sum(p['rss_kb'] for _, p in below)
+    pcpu = proc['pcpu'] + sum(p['pcpu'] for _, p in below)
+    return {
+        'pid': proc['pid'],
+        'pgid': proc['pgid'],
+        'shell_pgid': shell_pgid,
+        'cmd': label,
+        'args': proc['args'],
+        'name': basename_of(label),
+        'elapsed': proc['etime'],
+        'age': clock_seconds(proc['etime']),
+        'cpu': cpu_percent(proc['pid'], cpu_seconds, now, pcpu),
+        'mem_kb': rss_kb,
+        'ports': ports_under(proc['pid'], below, ports),
+        'agent': agent,
+        'cwd': fg_cwd.get(proc['pid']) or cwd,
+        'where': where,
+        'window_id': window_id,
+        'tab_title': tab_label,
+        'pane': pane,
+        'at_prompt': at_prompt,
+        'kill_group': True,
+        'depth': 0,
+        'detached': detached,
+        'synthetic': False,
+        'children': [{
+            'pid': child['pid'],
+            'pgid': child['pgid'],
+            'shell_pgid': None,
+            'cmd': pretty_cmd(child['args']),
+            'args': child['args'],
+            'name': basename_of(child['args']),
+            'elapsed': child['etime'],
+            'age': clock_seconds(child['etime']),
+            'cpu': cpu_percent(child['pid'], child['cpu_seconds'], now,
+                               child['pcpu']),
+            'mem_kb': child['rss_kb'],
+            'ports': ports_under(child['pid'],
+                                 subtree(child['pid'], table, kids), ports),
+            'agent': False,
+            'cwd': fg_cwd.get(child['pid'], ''),
+            'where': '',
+            'window_id': window_id,
+            # A child shares its parent's process group, so signalling the
+            # group here would kill the job too.
+            'kill_group': False,
+            'depth': depth,
+            'detached': detached,
+            'synthetic': False,
+            'children': [],
+        } for depth, child in shown],
+    }
+
+
+def detached_jobs(table, kids, covered, now, ports, panes) -> list[dict]:
+    """Jobs this kitty started that no pane can reach any more.
+
+    When the shell that started a dev server exits, launchd adopts what it
+    left running: the job keeps its port and its memory, but walking down
+    from the panes can never find it again -- which is exactly how one runs
+    for a day unnoticed. Its environment still names this kitty and the
+    window it came from, and that is what identifies it here.
+    """
+    ours = kitty_pid()
+    if ours is None:
+        return []
+    # A covered process's children are covered too, so the tops of what is
+    # left -- the ones whose parent is not also uncovered -- are exactly the
+    # processes that were adopted away from a pane.
+    loose = set(table) - covered
+    orphans = [pid for pid in loose if table[pid]['ppid'] not in loose]
+    origins = {pid: window for pid, (kitty, window)
+               in kitty_env(orphans).items() if kitty == ours}
+    found = [(window, proc) for root, window in origins.items()
+             for proc in topmost_jobs(root, table, kids)]
+    cwds = working_dirs([proc['pid'] for _, proc in found])
+    jobs: list[dict] = []
+    for window, proc in found:
+        origin = panes.get(window)
+        label = pretty_cmd(proc['args'])
+        jobs.append(job_row(
+            proc, table, kids, now, ports,
+            label=label, agent=basename_of(label) in AGENTS,
+            where='⌁ ' + (origin['where'] if origin else 'detached'),
+            window_id=origin['id'] if origin else None,
+            tab_label=origin['tab'] if origin else '',
+            pane=origin['pane'] if origin else 0,
+            cwd=cwds.get(proc['pid'], ''), detached=True))
+    return jobs
+
+
+def daemon_summary(daemons: list[dict]) -> dict:
+    """One folded row standing in for the services a pane left running.
+
+    colima, a database, a docker VM: started from a terminal, meant to
+    outlive it, and never the thing you opened this list to find. They still
+    count towards the totals, and `tab` opens them for a kill.
+    """
+    children: list[dict] = []
+    for job in sorted(daemons, key=lambda r: r['cmd']):
+        children.append({**job, 'depth': 1, 'where': '', 'children': []})
+        for child in job['children']:
+            children.append({**child, 'depth': child['depth'] + 1})
+    oldest = max(daemons, key=lambda r: r['age'])
+    return {
+        'pid': DAEMON_PID, 'pgid': None, 'shell_pgid': None,
+        'cmd': f'{len(daemons)} daemon' + ('s' if len(daemons) > 1 else ''),
+        'args': '', 'name': 'daemons',
+        'elapsed': oldest['elapsed'], 'age': oldest['age'],
+        'cpu': sum(job['cpu'] for job in daemons),
+        'mem_kb': sum(job['mem_kb'] for job in daemons),
+        'ports': sorted({port for job in daemons for port in job['ports']}),
+        'agent': False, 'cwd': '', 'where': '⌁ background',
+        'window_id': None, 'tab_title': '', 'pane': 0, 'at_prompt': False,
+        'kill_group': False, 'depth': 0,
+        'detached': True, 'synthetic': True, 'children': children,
+    }
+
+
 def collect() -> list[dict]:
     """One row per running command, across every pane of this kitty."""
     table = process_table()
     kids = children_of(table)
+    for cache in (_env_cache, _cwd_cache):
+        for pid in set(cache) - set(table):
+            del cache[pid]
     mine = ancestors(os.getpid(), table)
+    ports = listening_ports()
     os_windows = kitty_ls()
     multi = len(os_windows) > 1
     now = time.monotonic()
     rows: list[dict] = []
+    covered: set[int] = set(mine)
+    panes_by_id: dict[int, dict] = {}
     for wi, osw in enumerate(os_windows, 1):
         for tab in osw['tabs']:
             # A group is one pane: its base window plus any overlay stacked on
@@ -309,6 +605,13 @@ def collect() -> list[dict]:
                      for wid in group['windows'] if wid in by_id]
             tab_label = tab_name(tab, tab['windows'], mine)
             for pi, win in panes:
+                where = f'{tab_label} · pane {pi}'
+                if multi:
+                    where = f'win{wi} · ' + where
+                covered.add(win['pid'])
+                covered |= descendants(win['pid'], kids)
+                panes_by_id[win['id']] = {'where': where, 'tab': tab_label,
+                                          'pane': pi, 'id': win['id']}
                 # kitty knows each foreground process's own cwd; ps does not.
                 fg_cwd = {p['pid']: p['cwd']
                           for p in win.get('foreground_processes', ())
@@ -323,61 +626,22 @@ def collect() -> list[dict]:
                         session = session_label(win['title'])
                         if session:
                             label = f'{name} {session}'
-                    where = f'{tab_label} · pane {pi}'
-                    if multi:
-                        where = f'win{wi} · ' + where
+                    rows.append(job_row(
+                        proc, table, kids, now, ports,
+                        label=label, agent=agent, where=where,
+                        window_id=win['id'],
+                        shell_pgid=table.get(win['pid'], {}).get('pgid'),
+                        tab_label=tab_label, pane=pi,
+                        at_prompt=win['at_prompt'], cwd=win['cwd'],
+                        fg_cwd=fg_cwd))
 
-                    descendants = subtree(proc['pid'], table, kids)
-                    shown = real_tree(proc['pid'], table, kids)
-                    cpu_seconds = proc['cpu_seconds'] + sum(
-                        p['cpu_seconds'] for _, p in descendants)
-                    rss_kb = proc['rss_kb'] + sum(
-                        p['rss_kb'] for _, p in descendants)
-                    pcpu = proc['pcpu'] + sum(p['pcpu'] for _, p in descendants)
-                    rows.append({
-                        'pid': proc['pid'],
-                        'pgid': proc['pgid'],
-                        'shell_pgid': table.get(win['pid'], {}).get('pgid'),
-                        'cmd': label,
-                        'args': proc['args'],
-                        'name': name,
-                        'elapsed': proc['etime'],
-                        'age': clock_seconds(proc['etime']),
-                        'cpu': cpu_percent(proc['pid'], cpu_seconds, now, pcpu),
-                        'mem_kb': rss_kb,
-                        'agent': agent,
-                        'cwd': fg_cwd.get(proc['pid'], win['cwd']),
-                        'where': where,
-                        'window_id': win['id'],
-                        'tab_title': tab_label,
-                        'pane': pi,
-                        'at_prompt': win['at_prompt'],
-                        'kill_group': True,
-                        'depth': 0,
-                        'children': [{
-                            'pid': child['pid'],
-                            'pgid': child['pgid'],
-                            'shell_pgid': None,
-                            'cmd': pretty_cmd(child['args']),
-                            'args': child['args'],
-                            'name': basename_of(child['args']),
-                            'elapsed': child['etime'],
-                            'age': clock_seconds(child['etime']),
-                            'cpu': cpu_percent(child['pid'],
-                                               child['cpu_seconds'], now,
-                                               child['pcpu']),
-                            'mem_kb': child['rss_kb'],
-                            'agent': False,
-                            'cwd': fg_cwd.get(child['pid'], ''),
-                            'where': '',
-                            'window_id': win['id'],
-                            # A child shares its parent's process group, so
-                            # signalling the group here would kill the job too.
-                            'kill_group': False,
-                            'depth': depth,
-                            'children': [],
-                        } for depth, child in shown],
-                    })
+    rows += detached_jobs(table, kids, covered, now, ports, panes_by_id)
+    daemons = [row for row in rows if row['detached'] and row['name'] in DAEMONS]
+    if daemons:
+        folded = {row['pid'] for row in daemons}
+        rows = [row for row in rows if row['pid'] not in folded]
+        rows.append(daemon_summary(daemons))
+
     stale = set(_cpu_prev) - {r['pid'] for r in rows} - {
         c['pid'] for r in rows for c in r['children']}
     for pid in stale:
@@ -392,12 +656,17 @@ def sort_rows(rows: list[dict], mode: str) -> list[dict]:
         return sorted(rows, key=lambda r: (-r['mem_kb'], r['where'], r['pid']))
     if mode == 'age':
         return sorted(rows, key=lambda r: (-r['age'], r['where'], r['pid']))
-    return sorted(rows, key=lambda r: (r['agent'], r['where'], r['pid']))
+    # Live work first, then agents, then what no pane is holding any more --
+    # with the folded daemons at the very bottom of that.
+    return sorted(rows, key=lambda r: (r['detached'], r['synthetic'],
+                                       r['agent'], r['where'], r['pid']))
 
 
 def kill_row(row: dict, sig: int) -> str | None:
     """Signal the row's process group, or the pid alone when that isn't safe."""
     pgid, pid = row['pgid'], row['pid']
+    if pid <= 1:
+        return None  # a heading row, not a process: os.kill(-1) is everything
     group = row.get('kill_group') and pgid and pgid != row.get('shell_pgid')
     try:
         os.kill(-pgid if group else pid, sig)
@@ -452,6 +721,14 @@ def short_mem(kb: int) -> str:
     return f'{kb}K' if kb else ''
 
 
+def short_port(ports: list[int]) -> str:
+    """The first port a job listens on, and how many more it is holding."""
+    if not ports:
+        return ''
+    extra = f'+{len(ports) - 1}' if len(ports) > 1 else ''
+    return f':{ports[0]}{extra}'
+
+
 def short_cpu(percent: float) -> str:
     if percent >= 10:
         return f'{percent:.0f}%'
@@ -484,6 +761,10 @@ class Picker:
         # arrives with its tree open rather than needing a keypress.
         self.collapsed: set[int] = set()
         self.dying: dict[int, float] = {}
+        # The daemon row opens folded the first time it appears; after that
+        # whether it is open is the user's business, like any other fold.
+        self.saw_daemons = False
+        self.show_ports = False
         self.sort = 'tab'
         self.message = ''
         self.last_load = 0.0
@@ -494,6 +775,14 @@ class Picker:
         keep = self.visible[self.cursor]['pid'] if self.visible else None
         self.jobs = sort_rows(collect(), self.sort)
         self.collapsed &= {job['pid'] for job in self.jobs}
+        daemons = any(job['pid'] == DAEMON_PID for job in self.jobs)
+        if daemons and not self.saw_daemons:
+            self.collapsed.add(DAEMON_PID)
+        self.saw_daemons = daemons
+        # Held steady while folds open and close so the columns do not shift
+        # under the cursor, and dropped entirely when nothing is listening.
+        self.show_ports = any(row['ports'] for job in self.jobs
+                              for row in (job, *job['children']))
         self.flatten()
         alive = {row['pid'] for row in self.visible}
         self.marked &= alive
@@ -537,11 +826,17 @@ class Picker:
         # Every real command, folded away or not -- the count is what is
         # running, not what happens to be on screen.
         agents = sum(1 for job in self.jobs if job['agent'])
-        live = sum(1 + len(job['children']) for job in self.jobs) - agents
+        # The daemon row is a heading, not a command; what it hides still counts.
+        live = sum(len(job['children']) + (not job['synthetic'])
+                   for job in self.jobs) - agents
         cpu = sum(job['cpu'] for job in self.jobs)
         mem = sum(job['mem_kb'] for job in self.jobs)
         left = f' Running ({live})  ·  {short_cpu(cpu)} cpu  ·  {short_mem(mem)}'
         right = f'sort: {self.sort} '
+        loose = sum(1 for job in self.jobs
+                    if job['detached'] and not job['synthetic'])
+        if loose:
+            right = f'{loose} detached  ·  ' + right
         if agents:
             right = f'{agents} agent{"s" if agents > 1 else ""}  ·  ' + right
         pad = max(1, width - 1 - len(left) - len(right))
@@ -565,7 +860,10 @@ class Picker:
 
     def columns(self, width: int) -> tuple[int, int, int]:
         # Fixed: mark, four gaps, elapsed, cpu, mem, and the gap before cwd.
-        avail = max(24, width - 1 - (1 + 1 + 1 + 5 + 1 + 5 + 1 + 6 + 2))
+        fixed = 1 + 1 + 1 + 5 + 1 + 5 + 1 + 6 + 2
+        if self.show_ports:
+            fixed += PORT_W + 1
+        avail = max(24, width - 1 - fixed)
         where_w = min(22, max(10, avail // 4))
         cmd_w = min(52, max(12, avail - where_w - 12))
         cwd_w = max(0, avail - where_w - cmd_w)
@@ -579,6 +877,10 @@ class Picker:
         attr = curses.A_REVERSE if selected else curses.A_NORMAL
         if row['agent'] or dying or child:
             attr |= curses.A_DIM
+        if row['detached']:
+            # The whole point of these rows is that you did not know they were
+            # running, so they are the one thing in the list that is coloured.
+            attr |= curses.color_pair(3)
 
         where_w, cmd_w, cwd_w = self.columns(width)
         if row['children']:
@@ -589,12 +891,15 @@ class Picker:
         if child:
             cmd = '  ' * (row['depth'] - 1) + '└ ' + cmd
             glyph = '  '
+        port = (truncate(short_port(row['ports']), PORT_W).rjust(PORT_W)
+                + ' ' if self.show_ports else '')
         line = (f"{'•' if row['pid'] in self.marked else ' '} "
                 f"{truncate(row['where'], where_w).ljust(where_w)} "
                 f"{truncate(glyph + cmd, cmd_w).ljust(cmd_w)} "
                 f"{short_elapsed(row['elapsed']).rjust(5)} "
                 f"{short_cpu(row['cpu']).rjust(5)} "
                 f"{short_mem(row['mem_kb']).rjust(6)}  "
+                f"{port}"
                 f"{truncate(short_cwd(row['cwd'], cwd_w), cwd_w)}")
         self.put(y, 0, line.ljust(max(0, width - 1)), attr)
 
@@ -603,7 +908,7 @@ class Picker:
         if self.marked:
             return [row for row in self.visible if row['pid'] in self.marked]
         row = self.row()
-        return [row] if row else []
+        return [row] if row and not row['synthetic'] else []
 
     def confirm(self, prompt: str) -> bool:
         import curses
@@ -621,6 +926,9 @@ class Picker:
     def kill(self, sig: int) -> None:
         rows = self.targets()
         if not rows:
+            row = self.row()
+            if row is not None and row['synthetic']:
+                self.message = 'open it with tab and kill a daemon by name'
             return
         name = 'SIGKILL' if sig == signal.SIGKILL else 'SIGTERM'
         if len(rows) > 1:
@@ -657,6 +965,9 @@ class Picker:
         row = self.row()
         if row is None:
             return False
+        if not row['window_id']:
+            self.message = 'nothing to focus: this outlived the pane that ran it'
+            return False
         subprocess.run(['kitty', '@', '--to', socket_address(), 'focus-window',
                         '--match', f"id:{row['window_id']}"],
                        capture_output=True, text=True)
@@ -684,7 +995,8 @@ class Picker:
             elif key in (ord('G'), curses.KEY_END):
                 self.cursor = last
             elif key == ord(' ') and self.visible:
-                self.marked ^= {self.visible[self.cursor]['pid']}
+                if not self.visible[self.cursor]['synthetic']:
+                    self.marked ^= {self.visible[self.cursor]['pid']}
                 self.cursor = min(self.cursor + 1, last)
             elif key == ord('\t'):
                 self.toggle_children()
