@@ -155,7 +155,8 @@
     "claude-md-management@claude-plugins-official": true,
     "phpstorm-plugin@phpstorm-marketplace": true,
     "swift-lsp@claude-plugins-official": false,
-    "workmux-status@workmux": true
+    "workmux-status@workmux": true,
+    "csharp-lsp@claude-plugins-official": true
   },
   "extraKnownMarketplaces": {
     "phpstorm-marketplace": {
@@ -178,6 +179,9 @@
     },
     "claude-fable-5-1": {
       "effortLevel": "medium"
+    },
+    "claude-opus-5": {
+      "effortLevel": "high"
     }
   },
   "tui": "default",
