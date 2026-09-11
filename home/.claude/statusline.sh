@@ -62,9 +62,27 @@ fmt_duration() {
     fi
 }
 
+# A repo always draws the same colour, so a glance at two panes says whether
+# they are standing in the same place. Fourteen hues rather than every colour
+# the terminal has: four panes at once need telling apart, and near-shades of
+# one colour cannot be. Red is left out -- the bars claim it for trouble. 13
+# and 2^32-5 are just the pair that happened to spread the repos under ~/Work
+# across distinct entries; any rolling hash would do.
+repo_palette=(39 51 43 84 118 148 178 214 209 203 213 177 141 75)
+hash_color() {
+    local s=$1 i ord h=0
+    for ((i = 0; i < ${#s}; i++)); do
+        printf -v ord '%d' "'${s:i:1}"
+        h=$(((h * 13 + ord) % 4294967291))
+    done
+    printf '\\033[38;5;%sm' "${repo_palette[h % ${#repo_palette[@]}]}"
+}
+
 # --- Line 1: orientation ---
 
 git_info=""
+repo=""
+workspace=""
 if git -C "$dir" rev-parse --git-dir &>/dev/null; then
     branch=$(git -C "$dir" -c core.useBuiltinFSMonitor=false rev-parse --abbrev-ref HEAD 2>/dev/null || echo '')
     if [ -n "$branch" ]; then
@@ -74,15 +92,58 @@ if git -C "$dir" rev-parse --git-dir &>/dev/null; then
             git_info="${branch}*"
         fi
     fi
+
+    # Two panes are told apart by where they stand, so the line names the repo
+    # and then the checkout. The repo comes from the remote, which every clone
+    # and every worktree of it agrees on; without a remote, the main checkout's
+    # directory stands in for it.
+    paths=$(git -C "$dir" rev-parse --path-format=absolute --show-toplevel --git-common-dir 2>/dev/null || echo '')
+    top=$(printf '%s\n' "$paths" | sed -n 1p)
+    main=$(dirname "$(printf '%s\n' "$paths" | sed -n 2p)")
+    main_base=$(basename "$main")
+
+    origin=$(git -C "$dir" remote get-url origin 2>/dev/null || echo '')
+    repo="${origin%.git}"
+    repo="${repo##*/}"
+    [ -z "$repo" ] && repo="$main_base"
+
+    # The workspace is what this checkout adds to the repo name -- the `nl-link`
+    # of a second clone, the `wt-draft-index` of a worktree beside it. A main
+    # checkout that merely sits in a shorter directory than the repo is named
+    # (`kitty-terminal` cloned into `terminal`) adds nothing, and shows nothing.
+    if [ -n "$top" ]; then
+        base=$(basename "$top")
+        workspace="${base#"$repo"}"
+        [ "$workspace" = "$base" ] && workspace="${base#"$main_base"}"
+        if [ "$workspace" = "$base" ]; then
+            # Neither name is a prefix of the directory: only a linked worktree
+            # earns the whole directory as its label.
+            [ "$top" != "$main" ] || workspace=""
+        else
+            workspace="${workspace#[-_.]}"
+        fi
+    fi
+fi
+
+repo_str=""
+if [ -n "$repo" ]; then
+    repo_color=$(hash_color "$repo")
+    repo_str="${repo_color}${repo}${reset}"
+    [ -n "$workspace" ] && repo_str+="${dim}/${reset}${bold}${repo_color}${workspace}${reset}"
 fi
 
 short_model=$(echo "$model" | sed 's/Claude //' | sed 's/ /-/g')
+# Literal glyphs, not \uXXXX: /bin/bash is 3.2, whose printf %b leaves those
+# escapes untouched. Of the four only the diamond is in Monaco; the rest come
+# from font fallback, as the bar's shade block already does.
 if [[ "$model_id" == *"opus"* ]]; then
-    model_str="${bold}${yellow}${short_model}${reset}"
+    model_str="${bold}${yellow}◆ ${short_model}${reset}"
+elif [[ "$model_id" == *"fable"* ]]; then
+    model_str="${bold}${magenta}✦ ${short_model}${reset}"
 elif [[ "$model_id" == *"sonnet"* ]]; then
-    model_str="${cyan}${short_model}${reset}"
+    model_str="${cyan}◈ ${short_model}${reset}"
 elif [[ "$model_id" == *"haiku"* ]]; then
-    model_str="${blue}${short_model}${reset}"
+    model_str="${blue}○ ${short_model}${reset}"
 else
     model_str="${short_model}"
 fi
@@ -108,8 +169,9 @@ esac
 
 sep="${dim} · ${reset}"
 line="${model_str}"
-[ -n "$effort_str" ] && line+="${sep}${dim}effort${reset} ${effort_str}"
-[ -n "$git_info" ] && line+="${sep}${magenta}${git_info}${reset}"
+[ -n "$effort_str" ] && line+="${sep}${effort_str}"
+[ -n "$repo_str" ] && line+="${sep}${dim}workspace${reset} ${repo_str}"
+[ -n "$git_info" ] && line+="${sep}${dim}branch${reset} ${magenta}${git_info}${reset}"
 line+="${sep}${dim}ctx${reset} $(fill_bar "$ctx_pct" "$ctx_color") ${ctx_color}${ctx_pct}%${reset}"
 
 if [ -n "$fh_pct_raw" ] || [ -n "$sd_pct_raw" ]; then

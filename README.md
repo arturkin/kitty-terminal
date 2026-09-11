@@ -847,7 +847,8 @@ So `~/Work/guide` opens PhpStorm, `~/Work/monorepo` opens WebStorm. `⌥I` flips
 ~/.config/diffnav/config.yml        banner off, unified by default
 ~/.claude/settings.json             permissions, hooks, plugins, status line
 ~/.claude/skills/                   skills, plus the lsp plugin (see above)
-~/.claude/statusline.sh             the status line
+~/.claude/statusline.sh             the status line - repo/workspace, branch,
+                                    model, context and quota
 ~/.zshrc                            the CLAUDE_CODE_* strip
 ~/.claude/commands/*.md             the slash commands
 ```
