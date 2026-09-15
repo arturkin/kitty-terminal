@@ -1,0 +1,23 @@
+prefix_rule(
+    pattern = ["git", "push"],
+    decision = "prompt",
+    justification = "git push requires your explicit confirmation",
+    match = [
+        "git push",
+        "git push origin master",
+        "git push --force-with-lease",
+    ],
+    not_match = ["git status", "git pull"],
+)
+
+prefix_rule(
+    pattern = ["rtk", "git", "push"],
+    decision = "prompt",
+    justification = "git push through RTK requires your explicit confirmation",
+    match = [
+        "rtk git push",
+        "rtk git push origin master",
+        "rtk git push --force-with-lease",
+    ],
+    not_match = ["rtk git status", "rtk git pull"],
+)
