@@ -42,6 +42,16 @@
 # or the import dangles on the other machine.
 .claude/RTK.md
 
+# --- Codex ---------------------------------------------------------------
+# Config and durable instructions only. Auth, sessions, logs and caches stay
+# machine-local.
+.codex/config.toml
+.codex/AGENTS.md
+.codex/hooks.json
+.codex/hooks/
+.codex/agents/
+.codex/rules/
+
 # --- rtk (compresses bash output before Claude Code reads it) -------------
 # macOS path; `rtk config` prints the active one. It contains spaces, which
 # ./sync handles -- every entry is quoted. The hook itself lives in
