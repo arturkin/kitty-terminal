@@ -16,3 +16,4 @@ brew "diffnav"        # the tree view behind kdiff / CMD+SHIFT+G (kdiff falls ba
 brew "gh"             # git credentials and the open-pr skill
 brew "jq"             # every Claude Code hook and the status line parse JSON with it
 brew "go"             # `go install` for gopls
+brew "rtk"            # compresses bash output before Claude Code reads it; see docs/token-budget.md

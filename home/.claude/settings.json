@@ -9,79 +9,45 @@
       "WebFetch(domain:github.com)",
       "WebFetch(domain:raw.githubusercontent.com)",
       "Bash(ls:*)",
-      "Bash(node --version && cat /Users/arturkin/Work/monorepo/src/js/web/tmp/README.md 2>/dev/null)",
       "Bash(yarn lint:ts:*)",
-      "Read(//Users/arturkin/.claude/projects/**)",
       "Read(//Users/arturkin/.claude/**)",
-      "Bash(cd /Users/arturkin/Work/monorepo/src/js/web && npx tsc --noEmit --pretty src/components/features/TourBookingWidget/utils/tourBookingWidgetUtils.tsx src/components/features/TourBookingWidget/BookingWidgetState.tsx 2>&1 | head -50)",
       "WebSearch",
-      "Bash(git -C /Users/arturkin/Documents/work/projects/github-workflows remote get-url origin)",
       "mcp__claude_ai_Sentry__get_issue_details",
-      "Bash(cd src/js/web && npm run test -- src/utils/__tests__/fetchUtils.test.ts --no-coverage 2>&1 | tail -30)",
-      "Bash(cd src/js/web && npm run test -- src/utils/__tests__/fetchUtils.test.ts --no-coverage 2>&1 | tail -25)",
       "mcp__claude_ai_Asana__get_user",
       "mcp__claude_ai_Asana__search_objects",
-      "mcp__claude_ai_Asana__create_task_preview",
       "mcp__claude_ai_Asana__create_task_confirm",
-      "Bash(cd /Users/arturkin/Work/monorepo/src/js/web && npx eslint --no-eslintrc -c .eslintrc.js src/utils/__tests__/fetchUtils.test.ts src/utils/fetchUtils.ts 2>&1 | head -50)",
+      "mcp__claude_ai_Asana__get_task",
+      "mcp__claude_ai_Slite__get-note",
+      "mcp__webstorm__get_file_problems",
       "Bash(npx eslint:*)",
-      "Bash(npm test:*)",
-      "WebFetch(domain:guidetoiceland.is)",
-      "WebFetch(domain:cn.guidetoiceland.is)",
       "Bash(npx jest:*)",
       "Bash(npx tsc:*)",
-      "Read(//Users/arturkin/Work/guide/**)",
-      "Read(//Users/arturkin/Work/**)",
-      "Bash(2)",
-      "Bash(yarn format:*)",
-      "Bash(curl -s \"http://localhost:3000/trips-and-experiences/greenland-photo-workshops/midnight-sun-in-greenland-photo-workshop\")",
-      "Bash(yarn add *)",
-      "Bash(npx stylelint *)",
-      "mcp__webstorm__get_file_problems",
-      "mcp__webstorm__replace_text_in_file",
       "Bash(npx prettier *)",
-      "Bash(node_modules/.bin/eslint src/components/features/ContentPage src/components/ui/ImageLightbox/lightboxDynamicModule.tsx --ext .ts,.tsx --quiet)",
-      "Bash(node_modules/.bin/eslint src/components/features/ContentPage src/components/ui/ImageLightbox/lightboxDynamicModule.tsx --ext .ts,.tsx --fix --quiet)",
-      "Bash(node_modules/.bin/eslint src/components/features/ContactUs src/components/ui/ArticleLayout src/components/ui/ArticleWidget src/components/ui/ArticleCMS src/utils/csrfUtils.ts src/pages/contentPage.tsx src/shared/contentPageRoutes.ts --ext .ts,.tsx --quiet)",
-      "Bash(git check-ignore *)",
-      "Bash(git *)",
-      "Bash(xargs -I{} echo {})",
-      "Bash(sed -n '55,65p' /Users/arturkin/Work/monorepo/src/js/web/tsconfig.json)",
-      "Bash(sed -n '15,30p' /Users/arturkin/Work/monorepo/src/js/web/.eslintrc.js)",
-      "Bash(echo \"exit: $?\")",
+      "Bash(npx stylelint *)",
       "Bash(npx js-yaml *)",
-      "Bash(mkdir -p /tmp/lh-corrupt-test/lighthouse/data)",
-      "Bash(cp lighthouse-reports/summary.json /tmp/lh-corrupt-test/lighthouse/summary.json)",
-      "Bash(echo 'this is not valid json{{{')",
-      "Bash(DATA_DIR=/tmp/lh-corrupt-test/lighthouse node scripts/ci/lighthouse-dashboard.mjs)",
-      "Bash(echo \"---exit code: $?---\")",
-      "Bash(echo '{\"notRuns\": \"wrong shape\"}')",
-      "Read(//private/tmp/lh-corrupt-test/lighthouse/**)",
-      "Bash(rm -rf /tmp/lh-retention-test)",
-      "Bash(mkdir -p /tmp/lh-retention-test/lighthouse/data)",
-      "Bash(DATA_DIR=/tmp/lh-retention-test/lighthouse node scripts/ci/lighthouse-dashboard.mjs)",
-      "Read(//tmp/lh-retention-test/lighthouse/**)",
-      "Bash(rm -rf /tmp/lh-v)",
-      "Bash(mkdir -p /tmp/lh-v/lighthouse/data)",
-      "Bash(DATA_DIR=/tmp/lh-v/lighthouse node scripts/ci/lighthouse-dashboard.mjs)",
-      "Bash(lsof -ti:8765)",
-      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:8766/index.html)",
-      "Bash(open *)",
-      "mcp__claude_ai_Slite__get-note",
-      "mcp__claude_ai_Asana__get_task",
-      "Bash(gh pr *)",
-      "Bash(gcloud logging read 'resource.type=\"k8s_container\" *)",
-      "Bash(sort -k2)",
+      "Bash(node_modules/.bin/eslint:*)",
+      "Bash(npm test:*)",
+      "Bash(yarn add *)",
+      "Bash(yarn format:*)",
       "Bash(yarn info *)",
       "Bash(yarn npm *)",
       "Bash(yarn install *)",
       "Bash(yarn jest *)",
-      "Bash(go build *)",
-      "Bash(go test *)",
-      "Bash(echo \"exit $?\")",
       "Bash(yarn test *)",
       "Bash(yarn lint *)",
-      "Bash(go vet *)"
+      "Bash(go build *)",
+      "Bash(go test *)",
+      "Bash(go vet *)",
+      "Bash(git *)",
+      "Bash(gh pr *)",
+      "Bash(gcloud logging read 'resource.type=\"k8s_container\" *)",
+      "Bash(echo:*)",
+      "Bash(open *)",
+      "Bash(rtk gain:*)",
+      "Bash(rtk recall:*)",
+      "WebFetch(domain:guidetoiceland.is)",
+      "WebFetch(domain:cn.guidetoiceland.is)",
+      "Read(//Users/arturkin/Work/**)"
     ],
     "deny": [],
     "ask": [
@@ -108,6 +74,25 @@
             "type": "command",
             "command": "$HOME/.claude/hooks/deny-sensitive-files.sh",
             "statusMessage": "Checking for sensitive files..."
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/hooks/approve-cloud-mutations.sh",
+            "statusMessage": "Checking for cloud/IaC mutations..."
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "rtk hook claude"
           }
         ]
       }
@@ -172,7 +157,7 @@
       }
     }
   },
-  "effortLevel": "high",
+  "effortLevel": "medium",
   "modelSettings": {
     "claude-fable-5": {
       "effortLevel": "medium"
@@ -181,7 +166,7 @@
       "effortLevel": "medium"
     },
     "claude-opus-5": {
-      "effortLevel": "high"
+      "effortLevel": "medium"
     }
   },
   "tui": "default",
@@ -226,5 +211,26 @@
       "**routine under src/js/web/ prefix**: npm/yarn workspace commands (npm run, yarn run) per CLAUDE.md build/test instructions"
     ]
   },
-  "ENABLE_LSP_TOOL": true
+  "ENABLE_LSP_TOOL": true,
+  "outputStyle": "Concise",
+  "env": {
+    "RTK_TELEMETRY_DISABLED": "1"
+  },
+  "disabledMcpServers": [
+    "claude.ai Atlassian",
+    "claude.ai Box",
+    "claude.ai Canva",
+    "claude.ai HubSpot",
+    "claude.ai Higgsfield Video",
+    "claude.ai Intercom",
+    "claude.ai Linear",
+    "claude.ai Make",
+    "claude.ai Metabase",
+    "claude.ai Microsoft 365",
+    "claude.ai Notion",
+    "claude.ai Slack",
+    "claude.ai Superhuman Mail",
+    "claude.ai monday.com"
+  ],
+  "disableClaudeAiConnectors": true
 }

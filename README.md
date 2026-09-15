@@ -840,6 +840,8 @@ So `~/Work/guide` opens PhpStorm, `~/Work/monorepo` opens WebStorm. `⌥I` flips
 ~/.local/bin/kitty-notify           desktop notification tied to a pane
 ~/.config/wt/images.zsh             icat / ilast / iclear
 ~/.claude/hooks/kitty-notify.py     agent notifications (Claude Code hooks)
+~/.claude/hooks/                    cloud/IaC writes need approval; reads do not
+    approve-cloud-mutations.sh
 ~/.config/wt/shell.zsh              the `wt` function - worktree in this pane
 ~/.local/bin/{webstorm,phpstorm}    IDE launchers (Toolbox or /Applications)
 ~/.config/lazygit/config.yml        theme, delta as the diff renderer, ESC quits,
@@ -851,7 +853,19 @@ So `~/Work/guide` opens PhpStorm, `~/Work/monorepo` opens WebStorm. `⌥I` flips
                                     model, context and quota
 ~/.zshrc                            the CLAUDE_CODE_* strip
 ~/.claude/commands/*.md             the slash commands
+~/.claude/agents/*.md               subagents pinned to Haiku / Sonnet
+~/Library/Application Support/rtk/  rtk, which condenses bash output
+    config.toml
 ```
+
+What keeps Claude Code's token use down — the effort level, the connectors that
+are switched off, `rtk`, and the third-party "optimisers" this setup refuses to
+install — is [docs/token-budget.md](docs/token-budget.md).
+
+Why `helm upgrade` asks first and `helm list` does not, and why a local cluster
+has to be named explicitly to be exempt, is
+[docs/cloud-guardrails.md](docs/cloud-guardrails.md). Its hook fails closed, so
+edit it against `./tests/approve-cloud-mutations.sh`.
 
 ## Backup and restore
 
@@ -937,13 +951,14 @@ when it finishes:
 `export` refuses to finish if it finds a GitHub/AWS/Slack/Anthropic token or a
 private key anywhere under `home/`.
 
-One file still hardcodes this machine's username: `settings.json`, in about 30 places
-— 22 `Read(...)` deny rules, six one-off `Bash(...)` allow entries left over
-from past sessions, and one `autoMode` note. A restore under a different
-username needs a pass over that file. The deny rules are the part that matters,
-and `deny-sensitive-files.sh` already covers every path they name without
-depending on a username — it normalises `~` and `$HOME` itself and matches on
-the path text — so that protection survives a restore even before you edit
+One file still hardcodes this machine's username: `settings.json`, now in three
+places — two `Read(...)` allow rules (`~/.claude/**` and `~/Work/**`) and one
+`autoMode` note. It used to be about thirty; pruning the one-off `Bash(...)`
+entries left over from past sessions took the rest out. A restore under a
+different username needs a pass over those three. The read rules are the part
+that matters, and `deny-sensitive-files.sh` already covers every path they name
+without depending on a username — it normalises `~` and `$HOME` itself and
+matches on the path text — so that protection survives a restore even before you edit
 them. `.zshrc` is username-independent.
 
 ## Required kitty settings

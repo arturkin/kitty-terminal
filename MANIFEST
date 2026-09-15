@@ -37,6 +37,17 @@
 .claude/commands/
 .claude/skills/
 .claude/hooks/
+.claude/agents/
+# Written by `rtk init`, and @-imported by CLAUDE.md -- so it has to travel,
+# or the import dangles on the other machine.
+.claude/RTK.md
+
+# --- rtk (compresses bash output before Claude Code reads it) -------------
+# macOS path; `rtk config` prints the active one. It contains spaces, which
+# ./sync handles -- every entry is quoted. The hook itself lives in
+# settings.json above, so `brew bundle` is all another machine needs.
+# See docs/token-budget.md.
+Library/Application Support/rtk/config.toml
 
 # --- scripts -------------------------------------------------------------
 .local/bin/kitty-session

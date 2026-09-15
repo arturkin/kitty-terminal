@@ -7,9 +7,17 @@
     "env": {},
     "type": "stdio"
   },
+  "content-studio-staging": {
+    "type": "http",
+    "url": "https://admin.staging.guidetoiceland.is/mcp"
+  },
   "phpstorm": {
     "type": "http",
     "url": "http://127.0.0.1:64442/stream"
+  },
+  "sentry": {
+    "type": "http",
+    "url": "https://mcp.sentry.dev/mcp"
   },
   "webstorm": {
     "type": "sse",
