@@ -1,4 +1,7 @@
 {
+  "env": {
+    "RTK_TELEMETRY_DISABLED": "1"
+  },
   "permissions": {
     "allow": [
       "Bash(grep:*)",
@@ -56,6 +59,7 @@
     "defaultMode": "auto"
   },
   "model": "opus",
+  "disableClaudeAiConnectors": true,
   "hooks": {
     "PreToolUse": [
       {
@@ -141,7 +145,8 @@
     "phpstorm-plugin@phpstorm-marketplace": true,
     "swift-lsp@claude-plugins-official": false,
     "workmux-status@workmux": true,
-    "csharp-lsp@claude-plugins-official": true
+    "csharp-lsp@claude-plugins-official": true,
+    "pyright-lsp@claude-plugins-official": true
   },
   "extraKnownMarketplaces": {
     "phpstorm-marketplace": {
@@ -157,6 +162,7 @@
       }
     }
   },
+  "outputStyle": "Concise",
   "effortLevel": "medium",
   "modelSettings": {
     "claude-fable-5": {
@@ -212,10 +218,6 @@
     ]
   },
   "ENABLE_LSP_TOOL": true,
-  "outputStyle": "Concise",
-  "env": {
-    "RTK_TELEMETRY_DISABLED": "1"
-  },
   "disabledMcpServers": [
     "claude.ai Atlassian",
     "claude.ai Box",
@@ -231,6 +233,5 @@
     "claude.ai Slack",
     "claude.ai Superhuman Mail",
     "claude.ai monday.com"
-  ],
-  "disableClaudeAiConnectors": true
+  ]
 }

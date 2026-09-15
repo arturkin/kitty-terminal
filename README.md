@@ -854,13 +854,18 @@ So `~/Work/guide` opens PhpStorm, `~/Work/monorepo` opens WebStorm. `⌥I` flips
 ~/.zshrc                            the CLAUDE_CODE_* strip
 ~/.claude/commands/*.md             the slash commands
 ~/.claude/agents/*.md               subagents pinned to Haiku / Sonnet
+~/.codex/config.toml                medium effort, low verbosity, MCP/plugin defaults
+~/.codex/agents/*.toml              scout/verifier on Terra, reviewer on Sol
+~/.codex/AGENTS.md                  Codex instructions for explicit RTK command wrapping
+~/.codex/hooks.json                 Codex notifications and safety hooks
+~/.codex/rules/default.rules        explicit confirmation for git push, including via RTK
 ~/Library/Application Support/rtk/  rtk, which condenses bash output
     config.toml
 ```
 
-What keeps Claude Code's token use down — the effort level, the connectors that
-are switched off, `rtk`, and the third-party "optimisers" this setup refuses to
-install — is [docs/token-budget.md](docs/token-budget.md).
+What keeps Claude Code and Codex token use down — effort and verbosity levels,
+the connectors that are switched off, `rtk`, and the third-party "optimisers"
+this setup refuses to install — is [docs/token-budget.md](docs/token-budget.md).
 
 Why `helm upgrade` asks first and `helm list` does not, and why a local cluster
 has to be named explicitly to be exempt, is
@@ -881,9 +886,10 @@ Every file in the list above lives in this repo under `home/`, which mirrors
 
 `MANIFEST` is the whitelist of tracked paths — nothing else can enter the repo,
 which is how Claude Code's runtime state (`history.jsonl`, `projects/`,
-`sessions/`, `.credentials.json`, caches, logs) stays out. `~/.claude/plugins/`
-is left out on purpose: `settings.json` already carries `enabledPlugins` and
-`extraKnownMarketplaces`, so Claude Code reinstalls them itself.
+`sessions/`, `.credentials.json`, caches, logs) stays out. Codex auth, sessions,
+logs and caches are excluded for the same reason. `~/.claude/plugins/` and
+`~/.codex/plugins/` are left out on purpose: their settings files carry the
+marketplace and enabled-plugin configuration.
 
 `~/.config/kitty/local.d/*.conf` is deliberately *not* mirrored, in either
 direction — it is the machine-local override point, so publishing it would
@@ -914,9 +920,28 @@ nvm install 24 && npm i -g typescript typescript-language-server intelephense \
 go install golang.org/x/tools/gopls@latest
 dotnet tool install -g csharp-ls          # needs a .NET SDK; DOTNET_ROOT is set in .zshrc
 
-# 5. credentials and IDE
+# 5. MCP servers -- `install` prints these lines with the URLs filled in
+claude mcp add-json sentry '{"type":"http","url":"https://mcp.sentry.dev/mcp"}'
+claude mcp add-json content-studio-staging '{"type":"http","url":"https://admin.staging.guidetoiceland.is/mcp"}'
+claude mcp add-json chrome-devtools '{"type":"stdio","command":"npx","args":["chrome-devtools-mcp@latest"],"env":{}}'
+claude mcp add-json webstorm '{"type":"sse","url":"http://127.0.0.1:64343/sse"}'
+claude mcp add-json phpstorm '{"type":"http","url":"http://127.0.0.1:64442/stream"}'
+
+# the two hosted ones need OAuth, once per machine (interactive)
+claude mcp login sentry
+claude mcp login content-studio-staging
+
+# 6. credentials and IDE
 gh auth login
 ```
+
+`rtk` needs no `rtk init` here — `brew bundle` installs the binary, and `install`
+carries both its config and the `PreToolUse` hook that `settings.json` already
+holds. Verify with `rtk --version` and `rtk config`.
+
+`settings.json` also carries `disableClaudeAiConnectors: true`, so no claude.ai
+connector attaches to the CLI on the new machine either — which is why Sentry and
+Content Studio are added above as ordinary HTTP servers rather than connectors.
 
 What each step is for: `kitty` and `workmux` are the terminal and the worktree
 manager; `lazygit` is `F3`; `git-delta` renders every diff body (lazygit's
